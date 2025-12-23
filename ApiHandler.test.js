@@ -1498,4 +1498,274 @@ describe('ApiHandler - Comprehensive Test Suite', () => {
     });
   });
 
+  // =============================================================================
+  // 🔥 ADDITIONAL HIGH SEVERITY TESTS
+  // =============================================================================
+
+  describe('🔥 HIGH-EXTRA-1: Catch-all error guard for unexpected exceptions', () => {
+    test('should handle exceptions in route resolution phase', async () => {
+      // Test the catch-all error handler by triggering a handler execution error
+      const errorHandler = jest.fn(() => {
+        throw new Error('Unexpected handler error');
+      });
+
+      mockAutoLoader.ensureRouteDependencies.mockReturnValue({
+        handlerFns: [errorHandler]
+      });
+      mockSafeUtils.sanitizeValidate.mockReturnValue({ userId: 123 });
+
+      const apiHandler = new ApiHandler({
+        routeConfig: validRouteConfig,
+        autoLoader: mockAutoLoader,
+        logger: mockLogger,
+        safeUtils: mockSafeUtils
+      });
+
+      const result = await apiHandler.handleRootApi({
+        method: 'POST',
+        body: { namespace: 'test', action: 'sample', userId: 123 }
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.status).toBe(500);
+      expect(result.error.message).toContain('Handler');
+    });
+  });
+
+  describe('🔥 HIGH-EXTRA-2: Handler context isolation', () => {
+    test('should prevent handlers from mutating shared pipelineInput', async () => {
+      const mutatingHandler = jest.fn((input) => {
+        // Test that input is properly isolated
+        const isProtected = Object.isFrozen(input.validated);
+        return { 
+          isolation: 'success', 
+          frozen: isProtected,
+          attemptedMutation: isProtected ? 'blocked' : 'allowed'
+        };
+      });
+
+      mockAutoLoader.ensureRouteDependencies.mockReturnValue({
+        handlerFns: [mutatingHandler]
+      });
+      mockSafeUtils.sanitizeValidate.mockReturnValue({ userId: 123 });
+
+      const apiHandler = new ApiHandler({
+        routeConfig: validRouteConfig,
+        autoLoader: mockAutoLoader,
+        logger: mockLogger,
+        safeUtils: mockSafeUtils
+      });
+
+      const result = await apiHandler.handleRootApi({
+        method: 'POST',
+        body: { namespace: 'test', action: 'sample', userId: 123 }
+      });
+
+      expect(result.data.isolation).toBe('success');
+      expect(result.data.attemptedMutation).toBe('blocked');
+      const handlerInput = mutatingHandler.mock.calls[0][0];
+      expect(Object.isFrozen(handlerInput.validated)).toBe(true);
+    });
+  });
+
+  // =============================================================================
+  // ⚠️ ADDITIONAL MEDIUM SEVERITY TESTS  
+  // =============================================================================
+
+  describe('⚠️ MEDIUM-EXTRA-1: Date.now() optimization and timestamp consistency', () => {
+    test('should support timestamp injection for testing', async () => {
+      const fixedTimestamp = 1640995200000;
+      const mockTimestamp = jest.fn(() => fixedTimestamp);
+
+      mockAutoLoader.ensureRouteDependencies.mockReturnValue({
+        handlerFns: [jest.fn(() => ({ success: true }))]
+      });
+      mockSafeUtils.sanitizeValidate.mockReturnValue({ userId: 123 });
+
+      const apiHandler = new ApiHandler({
+        routeConfig: validRouteConfig,
+        autoLoader: mockAutoLoader,
+        logger: mockLogger,
+        safeUtils: mockSafeUtils,
+        timestampFn: mockTimestamp
+      });
+
+      await apiHandler.handleRootApi({
+        method: 'POST',
+        body: { namespace: 'test', action: 'sample', userId: 123 }
+      });
+
+      expect(mockTimestamp).toHaveBeenCalled();
+    });
+  });
+
+  describe('⚠️ MEDIUM-EXTRA-2: Async logger support', () => {
+    test('should handle async logger operations', async () => {
+      const asyncLogger = {
+        writeLog: jest.fn(async () => {
+          await new Promise(resolve => setTimeout(resolve, 10));
+          return { logged: true };
+        })
+      };
+
+      const apiHandler = new ApiHandler({
+        routeConfig: validRouteConfig,
+        autoLoader: mockAutoLoader,
+        logger: asyncLogger,
+        safeUtils: mockSafeUtils
+      });
+
+      const result = await apiHandler.handleRootApi({
+        method: 'INVALID_METHOD'
+      });
+
+      expect(result.status).toBe(405);
+      expect(asyncLogger.writeLog).toHaveBeenCalled();
+    });
+  });
+
+  describe('⚠️ MEDIUM-EXTRA-3: Error message fallbacks', () => {
+    test('should provide fallback message for non-Error exceptions', async () => {
+      const nonErrorHandler = jest.fn(() => {
+        throw 'String error instead of Error object';
+      });
+
+      mockAutoLoader.ensureRouteDependencies.mockReturnValue({
+        handlerFns: [nonErrorHandler]
+      });
+      mockSafeUtils.sanitizeValidate.mockReturnValue({ userId: 123 });
+
+      const apiHandler = new ApiHandler({
+        routeConfig: validRouteConfig,
+        autoLoader: mockAutoLoader,
+        logger: mockLogger,
+        safeUtils: mockSafeUtils
+      });
+
+      const result = await apiHandler.handleRootApi({
+        method: 'POST',
+        body: { namespace: 'test', action: 'sample', userId: 123 }
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toBeDefined();
+      expect(result.error.message.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('⚠️ MEDIUM-EXTRA-4: Handler concurrency support', () => {
+    test('should support parallel handler execution when enabled', async () => {
+      const startTime = Date.now();
+      
+      const slowHandler1 = jest.fn(async () => {
+        await new Promise(resolve => setTimeout(resolve, 30));
+        return { handler: 1 };
+      });
+      
+      const slowHandler2 = jest.fn(async () => {
+        await new Promise(resolve => setTimeout(resolve, 30));
+        return { handler: 2 };
+      });
+
+      mockAutoLoader.ensureRouteDependencies.mockReturnValue({
+        handlerFns: [slowHandler1, slowHandler2]
+      });
+      mockSafeUtils.sanitizeValidate.mockReturnValue({ userId: 123 });
+
+      const apiHandler = new ApiHandler({
+        routeConfig: validRouteConfig,
+        autoLoader: mockAutoLoader,
+        logger: mockLogger,
+        safeUtils: mockSafeUtils,
+        parallelHandlers: true
+      });
+
+      const result = await apiHandler.handleRootApi({
+        method: 'POST',
+        body: { namespace: 'test', action: 'sample', userId: 123 }
+      });
+
+      const totalTime = Date.now() - startTime;
+      
+      expect(result.ok).toBe(true);
+      expect(slowHandler1).toHaveBeenCalled();
+      expect(slowHandler2).toHaveBeenCalled();
+      expect(totalTime).toBeLessThan(80); // Parallel should be faster
+    });
+  });
+
+  // =============================================================================
+  // 🟡 ADDITIONAL LOW SEVERITY TESTS
+  // =============================================================================
+
+  describe('🟡 LOW-EXTRA-1: Route versioning support', () => {
+    test('should support versioned route resolution', async () => {
+      const versionedRouteConfig = {
+        apiHandler: [
+          {
+            test: {
+              'sample.v2': {
+                params: [
+                  { name: 'userId', type: 'int', required: true },
+                  { name: 'enhanced', type: 'string', required: false }
+                ]
+              }
+            }
+          }
+        ]
+      };
+
+      mockAutoLoader.ensureRouteDependencies.mockReturnValue({
+        handlerFns: [jest.fn(() => ({ version: 'v2' }))]
+      });
+      mockSafeUtils.sanitizeValidate.mockReturnValue({ userId: 123, enhanced: 'feature' });
+
+      const apiHandler = new ApiHandler({
+        routeConfig: versionedRouteConfig,
+        autoLoader: mockAutoLoader,
+        logger: mockLogger,
+        safeUtils: mockSafeUtils,
+        enableVersioning: true
+      });
+
+      const result = await apiHandler.handleRootApi({
+        method: 'POST',
+        body: { namespace: 'test', action: 'sample', version: 'v2', userId: 123, enhanced: 'feature' }
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.data.version).toBe('v2');
+    });
+  });
+
+  describe('🟡 LOW-EXTRA-2: Handler timeout protection', () => {
+    test('should timeout long-running handlers', async () => {
+      const hangingHandler = jest.fn(async () => {
+        await new Promise(resolve => setTimeout(resolve, 150));
+        return { completed: true };
+      });
+
+      mockAutoLoader.ensureRouteDependencies.mockReturnValue({
+        handlerFns: [hangingHandler]
+      });
+      mockSafeUtils.sanitizeValidate.mockReturnValue({ userId: 123 });
+
+      const apiHandler = new ApiHandler({
+        routeConfig: validRouteConfig,
+        autoLoader: mockAutoLoader,
+        logger: mockLogger,
+        safeUtils: mockSafeUtils,
+        handlerTimeout: 100
+      });
+
+      const result = await apiHandler.handleRootApi({
+        method: 'POST',
+        body: { namespace: 'test', action: 'sample', userId: 123 }
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toMatch(/timed out/i);
+    });
+  });
+
 });
