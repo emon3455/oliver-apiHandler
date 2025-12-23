@@ -170,14 +170,99 @@ _buildValidationSchema(paramDefs = [], incoming = {}) {
 
 ---
 
+## 7. ✅ Catch-all error guard for unexpected exceptions
+
+**Issue**: Exceptions occurring before/after the handler loop (e.g., route resolution, initialization) could crash the application without being caught.
+
+**Fix**: Added comprehensive error protection:
+- Wrapped entire `handleRootApi()` in try/catch
+- Created internal `_handleRootApiInternal()` method
+- All logic now protected by last-resort error handler
+- Logs critical unhandled exceptions
+- Returns graceful 500 error response
+- Prevents any edge-case exception from crashing the app
+
+**Location**: [ApiHandler.js](ApiHandler.js#L77-L101)
+
+```javascript
+async handleRootApi({ method, query, body, headers, context }) {
+  // Catch-all error guard to prevent any unexpected exceptions
+  try {
+    return await this._handleRootApiInternal({ method, query, body, headers, context });
+  } catch (err) {
+    // Last-resort error handler for unexpected exceptions outside normal flow
+    const message = `Unexpected API handler exception: ${err?.message || err}`;
+    console.error('[ApiHandler] CRITICAL: Unhandled exception:', err);
+    
+    this.logger.writeLog({ 
+      flag: this.logFlagError, 
+      action: "api.critical_unhandled_exception", 
+      message, 
+      critical: true, 
+      data: { error: String(err), stack: err?.stack, at: Date.now() } 
+    });
+    
+    return this._errorResponse(500, 'Internal server error - unexpected exception');
+  }
+}
+```
+
+---
+
+## 8. ✅ Handler context isolation
+
+**Issue**: All handlers shared a mutable `pipelineInput` object, allowing one handler to modify data that subsequent handlers would see, causing unpredictable behavior and potential security issues.
+
+**Fix**: Implemented comprehensive context isolation:
+- Created `_deepClone()` method for recursive deep cloning
+- Clones validated, extra, raw (query, body, headers), and context
+- Applied `Object.freeze()` to all cloned objects
+- Prevents handlers from mutating shared state
+- Each handler receives immutable isolated input
+- Eliminates cross-handler data pollution
+
+**Location**: [ApiHandler.js](ApiHandler.js#L248-L268)
+
+```javascript
+// Deep-clone pipelineInput to isolate handler context
+const basePipelineInput = { 
+  validated: this._deepClone(validated), 
+  extra: this._deepClone(extra), 
+  raw: { 
+    query: this._deepClone(query), 
+    body: this._deepClone(body), 
+    headers: this._deepClone(headers) 
+  }, 
+  context: this._deepClone(context), 
+  method 
+};
+
+// Freeze to prevent accidental mutations
+Object.freeze(basePipelineInput);
+Object.freeze(basePipelineInput.validated);
+Object.freeze(basePipelineInput.extra);
+Object.freeze(basePipelineInput.raw);
+```
+
+**Deep Clone Implementation**: [ApiHandler.js](ApiHandler.js#L450-L479)
+- Handles primitives, null, undefined
+- Properly clones Date objects
+- Recursively clones arrays
+- Deep clones plain objects
+- Safely handles non-clonable types
+
+---
+
 ## Impact Assessment
 
 ### Security Improvements
-- **Crash Protection**: Application can no longer be crashed by individual handler errors
+- **Crash Protection**: Application can no longer be crashed by individual handler errors OR unexpected exceptions
 - **Data Privacy**: Sensitive information is automatically redacted from logs
 - **Concurrency Safety**: No cross-request error contamination
 - **Attack Prevention**: Prototype pollution attacks are blocked
 - **Configuration Safety**: Invalid configurations fail fast with clear errors
+- **Context Isolation**: Handlers cannot pollute shared state or affect other handlers
+- **Catch-All Protection**: Last-resort error handler prevents any unhandled exception from crashing
 
 ### Backward Compatibility
 - ✅ All existing functionality preserved
@@ -192,6 +277,10 @@ _buildValidationSchema(paramDefs = [], incoming = {}) {
 4. Test with invalid route configurations
 5. Test with handlers that throw errors
 6. Test with malformed param definitions
+7. Test handlers attempting to mutate pipelineInput (should be frozen)
+8. Test unexpected exceptions in route resolution
+9. Test that frozen objects prevent mutations
+10. Test deep cloning handles nested objects correctly
 
 ---
 

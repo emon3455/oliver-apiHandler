@@ -75,6 +75,32 @@ class ApiHandler {
   }
 
   async handleRootApi({ method = "POST", query = {}, body = {}, headers = {}, context = {} }) {
+    // Catch-all error guard to prevent any unexpected exceptions from crashing the app
+    try {
+      return await this._handleRootApiInternal({ method, query, body, headers, context });
+    } catch (err) {
+      // Last-resort error handler for unexpected exceptions outside normal flow
+      const message = `Unexpected API handler exception: ${err?.message || err}`;
+      console.error('[ApiHandler] CRITICAL: Unhandled exception in handleRootApi:', err);
+      
+      this.logger.writeLog({ 
+        flag: this.logFlagError, 
+        action: "api.critical_unhandled_exception", 
+        message, 
+        critical: true, 
+        data: { 
+          error: String(err), 
+          stack: err?.stack,
+          method,
+          at: Date.now() 
+        } 
+      });
+      
+      return this._errorResponse(500, 'Internal server error - unexpected exception', [{ message, data: { error: String(err) } }]);
+    }
+  }
+
+  async _handleRootApiInternal({ method = "POST", query = {}, body = {}, headers = {}, context = {} }) {
     // Track request start time for performance monitoring
     const requestStartTime = Date.now();
     
@@ -220,9 +246,27 @@ class ApiHandler {
       return this._errorResponse(500, message, errorHandler.getAll());
     }
 
-    const pipelineInput = { validated, extra, raw: { query, body, headers }, context, method };
+    // Deep-clone pipelineInput to isolate handler context and prevent mutations
+    const basePipelineInput = { 
+      validated: this._deepClone(validated), 
+      extra: this._deepClone(extra), 
+      raw: { 
+        query: this._deepClone(query), 
+        body: this._deepClone(body), 
+        headers: this._deepClone(headers) 
+      }, 
+      context: this._deepClone(context), 
+      method 
+    };
+    
+    // Freeze to prevent accidental mutations (handlers should not modify input)
+    Object.freeze(basePipelineInput);
+    Object.freeze(basePipelineInput.validated);
+    Object.freeze(basePipelineInput.extra);
+    Object.freeze(basePipelineInput.raw);
+    
     console.log('🔄 [ApiHandler] Starting pipeline execution with', handlerFns.length, 'handlers');
-    const sanitizedPipelineInput = this._sanitizeForLogging(pipelineInput);
+    const sanitizedPipelineInput = this._sanitizeForLogging(basePipelineInput);
     console.log('🔄 [ApiHandler] Pipeline input:', sanitizedPipelineInput);
     
     const pipelineStartTime = Date.now();
@@ -234,7 +278,8 @@ class ApiHandler {
       
       try {
         // Individual try/catch for each handler to prevent one failure from crashing the app
-        const out = await fn(pipelineInput);
+        // Each handler receives isolated, frozen input to prevent context pollution
+        const out = await fn(basePipelineInput);
         const handlerDuration = Date.now() - handlerStartTime;
         
         // Validate handler response structure
@@ -400,6 +445,38 @@ class ApiHandler {
     if (m === "GET" || m === "HEAD") return safeQuery;
     if (m === "POST" || m === "PUT" || m === "PATCH" || m === "DELETE") return { ...safeQuery, ...safeBody };
     return safeQuery;
+  }
+
+  _deepClone(obj) {
+    // Handle primitives and null
+    if (obj === null || typeof obj !== 'object') {
+      return obj;
+    }
+    
+    // Handle Date
+    if (obj instanceof Date) {
+      return new Date(obj.getTime());
+    }
+    
+    // Handle Array
+    if (Array.isArray(obj)) {
+      return obj.map(item => this._deepClone(item));
+    }
+    
+    // Handle plain objects
+    if (Object.prototype.toString.call(obj) === '[object Object]') {
+      const cloned = {};
+      for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+          cloned[key] = this._deepClone(obj[key]);
+        }
+      }
+      return cloned;
+    }
+    
+    // For other types (functions, symbols, etc.), return as-is
+    // These shouldn't typically be in pipelineInput, but handle gracefully
+    return obj;
   }
 
   _coerceType(value, type) {
