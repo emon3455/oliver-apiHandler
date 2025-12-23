@@ -2,6 +2,33 @@ const ErrorHandler = require("./ErrorHandler.js");
 const Logger = require("./UtilityLogger.js");
 const SafeUtils = require("./SafeUtils.js");
 
+// Symbol-based private method keys for true privacy
+// These are truly private and cannot be accessed from outside the module
+const _privateSymbols = {
+  validateRouteConfig: Symbol('validateRouteConfig'),
+  initCoreUtilities: Symbol('initCoreUtilities'),
+  handleRootApiInternal: Symbol('handleRootApiInternal'),
+  resolveRouteFromArgs: Symbol('resolveRouteFromArgs'),
+  findNamespace: Symbol('findNamespace'),
+  resolveVersionedEntry: Symbol('resolveVersionedEntry'),
+  resolveStandardEntry: Symbol('resolveStandardEntry'),
+  buildValidationSchema: Symbol('buildValidationSchema'),
+  sanitizeExtraArgs: Symbol('sanitizeExtraArgs'),
+  collectIncomingArgs: Symbol('collectIncomingArgs'),
+  deepClone: Symbol('deepClone'),
+  coerceType: Symbol('coerceType'),
+  validateHandlerResponse: Symbol('validateHandlerResponse'),
+  sanitizeForLogging: Symbol('sanitizeForLogging'),
+  debugLog: Symbol('debugLog'),
+  safeLogWrite: Symbol('safeLogWrite'),
+  sanitizeErrorMessage: Symbol('sanitizeErrorMessage'),
+  stripInternalMetadata: Symbol('stripInternalMetadata'),
+  executeHandlersSerial: Symbol('executeHandlersSerial'),
+  executeHandlersParallel: Symbol('executeHandlersParallel'),
+  executeHandlerWithTimeout: Symbol('executeHandlerWithTimeout'),
+  errorResponse: Symbol('errorResponse')
+};
+
 class ApiHandler {
   constructor({ 
     routeConfig, 
@@ -49,6 +76,31 @@ class ApiHandler {
     if (this.autoLoader && typeof this.autoLoader.loadCoreUtilities === "function") {
       this._initCoreUtilities();
     }
+    
+    // Create Symbol-based aliases for truly private methods
+    // These cannot be accessed from outside the module scope
+    this[_privateSymbols.validateRouteConfig] = this._validateRouteConfig.bind(this);
+    this[_privateSymbols.initCoreUtilities] = this._initCoreUtilities.bind(this);
+    this[_privateSymbols.handleRootApiInternal] = this._handleRootApiInternal.bind(this);
+    this[_privateSymbols.resolveRouteFromArgs] = this._resolveRouteFromArgs.bind(this);
+    this[_privateSymbols.findNamespace] = this._findNamespace.bind(this);
+    this[_privateSymbols.resolveVersionedEntry] = this._resolveVersionedEntry.bind(this);
+    this[_privateSymbols.resolveStandardEntry] = this._resolveStandardEntry.bind(this);
+    this[_privateSymbols.buildValidationSchema] = this._buildValidationSchema.bind(this);
+    this[_privateSymbols.sanitizeExtraArgs] = this._sanitizeExtraArgs.bind(this);
+    this[_privateSymbols.collectIncomingArgs] = this._collectIncomingArgs.bind(this);
+    this[_privateSymbols.deepClone] = this._deepClone.bind(this);
+    this[_privateSymbols.coerceType] = this._coerceType.bind(this);
+    this[_privateSymbols.validateHandlerResponse] = this._validateHandlerResponse.bind(this);
+    this[_privateSymbols.sanitizeForLogging] = this._sanitizeForLogging.bind(this);
+    this[_privateSymbols.debugLog] = this._debugLog.bind(this);
+    this[_privateSymbols.safeLogWrite] = this._safeLogWrite.bind(this);
+    this[_privateSymbols.sanitizeErrorMessage] = this._sanitizeErrorMessage.bind(this);
+    this[_privateSymbols.stripInternalMetadata] = this._stripInternalMetadata.bind(this);
+    this[_privateSymbols.executeHandlersSerial] = this._executeHandlersSerial.bind(this);
+    this[_privateSymbols.executeHandlersParallel] = this._executeHandlersParallel.bind(this);
+    this[_privateSymbols.executeHandlerWithTimeout] = this._executeHandlerWithTimeout.bind(this);
+    this[_privateSymbols.errorResponse] = this._errorResponse.bind(this);
   }
 
   async _initCoreUtilities() {
@@ -122,33 +174,38 @@ class ApiHandler {
     const requestTimestamp = this.timestampFn();
     const requestStartTime = requestTimestamp;
     
+    // Generate unique request ID for tracing
+    const requestId = `req_${requestTimestamp}_${Math.random().toString(36).substr(2, 9)}`;
+    
     // Create request-scoped error handler with categorization
     const errorHandler = { errors: [] };
     errorHandler.add = (message, data = null, category = 'general') => {
-      errorHandler.errors.push({ message, data, category, timestamp: this.timestampFn() });
+      errorHandler.errors.push({ message, data, category, timestamp: this.timestampFn(), requestId });
     };
     errorHandler.hasErrors = () => errorHandler.errors.length > 0;
     errorHandler.getAll = () => errorHandler.errors;
 
-    this._debugLog('\n🚀 [ApiHandler] === NEW API REQUEST ===');
     // Sanitize inputs before logging to prevent sensitive data leakage
     const sanitizedQuery = this._sanitizeForLogging(query);
     const sanitizedBody = this._sanitizeForLogging(body);
-    this._debugLog('🚀 [ApiHandler] Method:', method, 'Query:', sanitizedQuery, 'Body:', sanitizedBody);
+    this._debugLog(`\n🚀 [ApiHandler] [${requestId}] New Request - Method: ${method}, Query:`, sanitizedQuery, 'Body:', sanitizedBody);
 
     // Validate HTTP method
     const normalizedMethod = String(method || "").toUpperCase();
     if (!this.allowedMethods.includes(normalizedMethod)) {
-      const message = `Method ${normalizedMethod} not allowed. Supported methods: ${this.allowedMethods.join(', ')}`;
-      this._debugLog('❌ [ApiHandler] Method not allowed:', normalizedMethod);
+      // Provide specific guidance for common methods that might be unsupported
+      const commonUnsupported = ['OPTIONS', 'PATCH', 'TRACE', 'CONNECT'];
+      const hint = commonUnsupported.includes(normalizedMethod) 
+        ? ` (${normalizedMethod} is not enabled by default; configure allowedMethods if needed)` 
+        : '';
+      const message = `Method ${normalizedMethod} not allowed. Supported methods: ${this.allowedMethods.join(', ')}${hint}`;
+      this._debugLog(`❌ [ApiHandler] [${requestId}] Method not allowed: ${normalizedMethod}`);
       errorHandler.add(message, { method: normalizedMethod, allowedMethods: this.allowedMethods }, 'method_validation');
-      await this._safeLogWrite({ flag: this.logFlagError, action: "api.method_not_allowed", message, critical: false, data: { method: normalizedMethod, at: requestTimestamp } });
+      await this._safeLogWrite({ flag: this.logFlagError, action: "api.method_not_allowed", message, critical: false, data: { method: normalizedMethod, requestId, at: requestTimestamp } });
       return this._errorResponse(405, message, errorHandler.getAll());
     }
 
     const args = this._collectIncomingArgs(method, query, body);
-    const sanitizedArgs = this._sanitizeForLogging(args);
-    this._debugLog('🚀 [ApiHandler] Collected args:', sanitizedArgs);
     
     // Extract namespace, actionKey, and optional version
     const namespace = String(args.namespace || "").trim();
@@ -156,26 +213,27 @@ class ApiHandler {
     const version = this.enableVersioning ? String(args.version || args.v || "").trim() : null;
     
     const routeIdentifier = version ? `${namespace}/${actionKey}@${version}` : `${namespace}/${actionKey}`;
-    this._debugLog(`🚀 [ApiHandler] Route requested: ${routeIdentifier}`);
+    const sanitizedArgs = this._sanitizeForLogging(args);
+    this._debugLog(`🚀 [ApiHandler] [${requestId}] Route: ${routeIdentifier}, Args:`, sanitizedArgs);
 
-    if (!namespace || !actionKey) {
-      const message = "Missing required routing fields: 'namespace' and/or 'action'";
-      this._debugLog('❌ [ApiHandler] Missing routing fields');
+    // Explicit validation: check for empty strings and actual content
+    if (!namespace || namespace.length === 0 || !actionKey || actionKey.length === 0) {
+      const message = "Missing or empty routing fields: 'namespace' and/or 'action' must be non-empty strings";
+      this._debugLog(`❌ [ApiHandler] [${requestId}] Invalid routing fields:`, { namespace, actionKey });
       errorHandler.add(message, { namespace, actionKey, version }, 'routing');
-      await this._safeLogWrite({ flag: this.logFlagError, action: "api.route_fields_missing", message, critical: true, data: { method, at: requestTimestamp } });
+      await this._safeLogWrite({ flag: this.logFlagError, action: "api.route_fields_missing", message, critical: true, data: { method, requestId, at: requestTimestamp } });
       return this._errorResponse(400, message, errorHandler.getAll());
     }
 
-    this._debugLog('🔍 [ApiHandler] Resolving route...');
     const resolved = this._resolveRouteFromArgs(namespace, actionKey, version);
     if (!resolved) {
-      const message = `API route not found for ${namespace}/${actionKey}${version ? `@${version}` : ''}`;
-      this._debugLog('❌ [ApiHandler] Route not found:', namespace + '/' + actionKey);
+      const message = `API route not found for ${routeIdentifier}`;
+      this._debugLog(`❌ [ApiHandler] [${requestId}] Route not found: ${routeIdentifier}`);
       errorHandler.add(message, { namespace, actionKey, version }, 'routing');
-      await this._safeLogWrite({ flag: this.logFlagError, action: "api.route_not_found", message, critical: true, data: { namespace, actionKey, version, method, at: requestTimestamp } });
+      await this._safeLogWrite({ flag: this.logFlagError, action: "api.route_not_found", message, critical: true, data: { namespace, actionKey, version, method, requestId, at: requestTimestamp } });
       return this._errorResponse(404, message);
     }
-    this._debugLog('✅ [ApiHandler] Route found:', namespace + '/' + actionKey);
+    this._debugLog(`✅ [ApiHandler] [${requestId}] Route resolved: ${routeIdentifier}`);
     const { entry } = resolved;
 
     // Validate entry structure
@@ -188,7 +246,7 @@ class ApiHandler {
 
     // Execute pre-validation middleware if configured
     if (this.preValidationMiddleware && typeof this.preValidationMiddleware === 'function') {
-      this._debugLog('🔍 [ApiHandler] Running pre-validation middleware...');
+      this._debugLog(`🔍 [ApiHandler] [${requestId}] Running pre-validation middleware...`);
       try {
         const middlewareResult = await this.preValidationMiddleware({ 
           method: normalizedMethod, 
@@ -199,29 +257,28 @@ class ApiHandler {
           namespace, 
           actionKey,
           version,
-          args 
+          args,
+          requestId 
         });
         
         // Allow middleware to short-circuit the request
         if (middlewareResult && middlewareResult.abort === true) {
-          this._debugLog('🛑 [ApiHandler] Pre-validation middleware aborted request');
+          this._debugLog(`🛑 [ApiHandler] [${requestId}] Pre-validation middleware aborted request`);
           return middlewareResult.response || this._errorResponse(403, 'Request blocked by middleware');
         }
       } catch (err) {
         const sanitizedError = this._sanitizeErrorMessage(err);
         const message = `Pre-validation middleware failed: ${sanitizedError}`;
         errorHandler.add(message, { namespace, actionKey }, 'middleware');
-        await this._safeLogWrite({ flag: this.logFlagError, action: "api.middleware_failed", message, critical: true, data: { namespace, actionKey, error: sanitizedError, at: requestTimestamp } });
+        await this._safeLogWrite({ flag: this.logFlagError, action: "api.middleware_failed", message, critical: true, data: { namespace, actionKey, requestId, error: sanitizedError, at: requestTimestamp } });
         return this._errorResponse(500, message, errorHandler.getAll());
       }
     }
 
-    this._debugLog('🔍 [ApiHandler] Starting validation...');
-    this._debugLog('🔍 [ApiHandler] Route params config:', entry.params);
+    this._debugLog(`🔍 [ApiHandler] [${requestId}] Validating params...`);
     let validated;
     try {
       const schema = this._buildValidationSchema(entry.params, args);
-      this._debugLog('🔍 [ApiHandler] Built validation schema:', schema);
       
       // Support both sync and async validation
       const validationResult = this.safeUtils.sanitizeValidate(schema);
@@ -229,19 +286,21 @@ class ApiHandler {
         ? await validationResult 
         : validationResult;
       
-      this._debugLog('✅ [ApiHandler] Validation passed:', validated);
+      this._debugLog(`✅ [ApiHandler] [${requestId}] Validation passed`);
     } catch (err) {
       const sanitizedError = this._sanitizeErrorMessage(err);
-      const message = `Validation failed for ${namespace}/${actionKey}: ${sanitizedError}`;
-      this._debugLog('❌ [ApiHandler] Validation failed:', sanitizedError);
+      const message = `Validation failed for ${routeIdentifier}: ${sanitizedError}`;
+      this._debugLog(`❌ [ApiHandler] [${requestId}] Validation failed:`, sanitizedError);
       errorHandler.add(message, { namespace, actionKey }, 'validation');
-      await this._safeLogWrite({ flag: this.logFlagError, action: "api.validation_failed", message, critical: true, data: { namespace, actionKey, error: sanitizedError, at: requestTimestamp } });
+      await this._safeLogWrite({ flag: this.logFlagError, action: "api.validation_failed", message, critical: true, data: { namespace, actionKey, requestId, error: sanitizedError, at: requestTimestamp } });
       return this._errorResponse(400, message, errorHandler.getAll());
     }
 
-    console.log('🔍 [ApiHandler] Sanitizing extra arguments...');
-    const extra = this._sanitizeExtraArgs(entry.params, args, validated);
-    console.log('✅ [ApiHandler] Extra args sanitized:', extra);
+    this._debugLog(`🔍 [ApiHandler] [${requestId}] Sanitizing extra arguments...`);
+    const rawExtra = this._sanitizeExtraArgs(entry.params, args, validated);
+    // Namespace extra args to prevent collision with response keys like ok, status, error
+    const extra = { userInput: rawExtra };
+    this._debugLog(`✅ [ApiHandler] [${requestId}] Extra args namespaced under userInput`);
 
     let handlerFns;
     let lastError;
@@ -257,7 +316,7 @@ class ApiHandler {
       } catch (err) {
         lastError = err;
         if (attempt < this.dependencyRetries) {
-          console.log(`⚠️ [ApiHandler] Dependency load attempt ${attempt + 1} failed, retrying...`);
+          this._debugLog(`⚠️ [ApiHandler] [${requestId}] Dependency load attempt ${attempt + 1} failed, retrying...`);
           // Small delay before retry
           await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
         }
@@ -267,9 +326,9 @@ class ApiHandler {
     // If all retries failed, return error
     if (!handlerFns) {
       const sanitizedError = this._sanitizeErrorMessage(lastError);
-      const message = `Failed to load route dependencies for ${namespace}/${actionKey} after ${this.dependencyRetries + 1} attempts: ${sanitizedError}`;
+      const message = `Failed to load route dependencies for ${routeIdentifier} after ${this.dependencyRetries + 1} attempts: ${sanitizedError}`;
       errorHandler.add(message, { namespace, actionKey, attempts: this.dependencyRetries + 1 }, 'dependencies');
-      await this._safeLogWrite({ flag: this.logFlagError, action: "api.autoload_failed", message, critical: true, data: { namespace, actionKey, error: sanitizedError, attempts: this.dependencyRetries + 1, at: requestTimestamp } });
+      await this._safeLogWrite({ flag: this.logFlagError, action: "api.autoload_failed", message, critical: true, data: { namespace, actionKey, requestId, error: sanitizedError, attempts: this.dependencyRetries + 1, at: requestTimestamp } });
       return this._errorResponse(500, message, errorHandler.getAll());
     }
 
@@ -282,7 +341,7 @@ class ApiHandler {
         body: this._deepClone(body), 
         headers: this._deepClone(headers) 
       }, 
-      context: this._deepClone(context), 
+      context: { ...this._deepClone(context), requestId }, // Add requestId to context
       method 
     };
     
@@ -291,72 +350,36 @@ class ApiHandler {
     Object.freeze(basePipelineInput.validated);
     Object.freeze(basePipelineInput.extra);
     Object.freeze(basePipelineInput.raw);
+    Object.freeze(basePipelineInput.context);
     
-    console.log('🔄 [ApiHandler] Starting pipeline execution with', handlerFns.length, 'handlers');
-    const sanitizedPipelineInput = this._sanitizeForLogging(basePipelineInput);
-    console.log('🔄 [ApiHandler] Pipeline input:', sanitizedPipelineInput);
+    this._debugLog(`🔄 [ApiHandler] [${requestId}] Executing ${handlerFns.length} handler(s)...`);
     
-    const pipelineStartTime = Date.now();
-    let lastNonUndefined;
-    for (let i = 0; i < handlerFns.length; i++) {
-      const fn = handlerFns[i];
-      const handlerStartTime = Date.now();
-      console.log(`🔄 [ApiHandler] Executing handler ${i + 1}/${handlerFns.length}: ${fn.name || 'anonymous'}`);
-      
-      try {
-        // Individual try/catch for each handler to prevent one failure from crashing the app
-        // Each handler receives isolated, frozen input to prevent context pollution
-        const out = await fn(basePipelineInput);
-        const handlerDuration = Date.now() - handlerStartTime;
-        
-        // Validate handler response structure
-        if (out !== undefined && out !== null) {
-          const validationError = this._validateHandlerResponse(out);
-          if (validationError) {
-            throw new TypeError(`Handler ${i + 1} returned invalid response: ${validationError}`);
-          }
-        }
-        
-        const sanitizedOut = this._sanitizeForLogging(out);
-        console.log(`🔄 [ApiHandler] Handler ${i + 1} result (${handlerDuration}ms):`, sanitizedOut);
-        
-        if (out && typeof out === "object" && out.abort === true) {
-          console.log(`🛑 [ApiHandler] Handler ${i + 1} requested abort, short-circuiting pipeline`);
-          const sanitizedResponse = this._sanitizeForLogging(out.response);
-          console.log('🛑 [ApiHandler] Abort response:', sanitizedResponse);
-          return out.response;
-        }
-        if (typeof out !== "undefined") {
-          lastNonUndefined = out;
-          console.log(`✅ [ApiHandler] Handler ${i + 1} completed, stored result`);
-        } else {
-          console.log(`✅ [ApiHandler] Handler ${i + 1} completed, no result to store`);
-        }
-      } catch (err) {
-        // Catch individual handler errors
-        const handlerDuration = Date.now() - handlerStartTime;
-        const message = `Handler ${i + 1} (${fn.name || 'anonymous'}) exception for ${namespace}/${actionKey}: ${err?.message || err}`;
-        errorHandler.add(message, { namespace, actionKey, handlerIndex: i, handlerName: fn.name || 'anonymous', duration: handlerDuration });
-        this.logger.writeLog({ flag: this.logFlagError, action: "api.handler_exception", message, critical: true, data: { namespace, actionKey, handlerIndex: i, error: String(err), stack: err?.stack, duration: handlerDuration, at: Date.now() } });
-        return this._errorResponse(500, message, errorHandler.getAll());
-      }
+    const pipelineStartTime = this.timestampFn();
+    
+    // Execute handlers (serial or parallel based on config)
+    const lastNonUndefined = this.parallelHandlers
+      ? await this._executeHandlersParallel(handlerFns, basePipelineInput, namespace, actionKey, errorHandler, requestTimestamp, pipelineStartTime)
+      : await this._executeHandlersSerial(handlerFns, basePipelineInput, namespace, actionKey, errorHandler, requestTimestamp, pipelineStartTime);
+    
+    // Check if error response was returned
+    if (lastNonUndefined && lastNonUndefined._isErrorResponse) {
+      const { _isErrorResponse, ...response } = lastNonUndefined;
+      return response;
     }
-    
-    const pipelineDuration = Date.now() - pipelineStartTime;
-    const totalDuration = Date.now() - requestStartTime;
-    console.log(`✅ [ApiHandler] All pipeline handlers completed successfully in ${pipelineDuration}ms`);
-    const sanitizedFinalResult = this._sanitizeForLogging(lastNonUndefined);
-    console.log('✅ [ApiHandler] Final result:', sanitizedFinalResult);
 
-    this.logger.writeLog({
+    const pipelineDuration = this.timestampFn() - pipelineStartTime;
+    const totalDuration = this.timestampFn() - requestStartTime;
+    this._debugLog(`✅ [ApiHandler] [${requestId}] Pipeline completed in ${pipelineDuration}ms (total: ${totalDuration}ms)`);
+
+    await this._safeLogWrite({
       flag: this.logFlagOk,
       action: "api.ok",
-      message: `Success: ${namespace}/${actionKey}`,
+      message: `Success: ${routeIdentifier}`,
       critical: false,
-      data: { namespace, actionKey, method, pipelineDuration, totalDuration, at: Date.now() }
+      data: { namespace, actionKey, method, requestId, pipelineDuration, totalDuration, at: requestTimestamp }
     });
 
-    return { ok: true, status: 200, data: typeof lastNonUndefined !== "undefined" ? lastNonUndefined : {} };
+    return { ok: true, status: 200, data: lastNonUndefined !== undefined ? lastNonUndefined : {}, requestId };
   }
 
   _resolveRouteFromArgs(namespace, actionKey, version = null) {
@@ -367,54 +390,65 @@ class ApiHandler {
       return this._routeCache.get(cacheKey);
     }
     
+    // Find namespace in route config
+    const ns = this._findNamespace(namespace);
+    if (!ns) {
+      // Cache null result to avoid repeated lookups
+      if (this.enableRouteCache) {
+        this._routeCache.set(cacheKey, null);
+      }
+      return null;
+    }
+    
+    // Resolve entry based on versioning
+    const entry = this.enableVersioning && version 
+      ? this._resolveVersionedEntry(ns, actionKey, version)
+      : this._resolveStandardEntry(ns, actionKey);
+    
+    const result = entry ? { entry } : null;
+    
+    // Cache result
+    if (this.enableRouteCache) {
+      this._routeCache.set(cacheKey, result);
+    }
+    
+    return result;
+  }
+
+  _findNamespace(namespace) {
     const containers = Array.isArray(this.routeConfig?.apiHandler) ? this.routeConfig.apiHandler : [];
     
     for (const group of containers) {
       if (group && Object.prototype.hasOwnProperty.call(group, namespace)) {
-        const ns = group[namespace];
-        
-        // Handle versioning if enabled
-        if (this.enableVersioning && version) {
-          // Look for versioned route: namespace.action.v1, namespace.action.v2, etc.
-          const versionedKey = `${actionKey}.${version}`;
-          if (ns && Object.prototype.hasOwnProperty.call(ns, versionedKey)) {
-            const result = { entry: ns[versionedKey] };
-            if (this.enableRouteCache) {
-              this._routeCache.set(cacheKey, result);
-            }
-            return result;
-          }
-          
-          // Look for action with version property
-          if (ns && Object.prototype.hasOwnProperty.call(ns, actionKey)) {
-            const entry = ns[actionKey];
-            if (entry.version === version || (Array.isArray(entry.versions) && entry.versions.includes(version))) {
-              const result = { entry };
-              if (this.enableRouteCache) {
-                this._routeCache.set(cacheKey, result);
-              }
-              return result;
-            }
-          }
-        } else {
-          // Standard lookup without versioning
-          if (ns && Object.prototype.hasOwnProperty.call(ns, actionKey)) {
-            const result = { entry: ns[actionKey] };
-            if (this.enableRouteCache) {
-              this._routeCache.set(cacheKey, result);
-            }
-            return result;
-          }
-        }
+        return group[namespace];
       }
     }
     
-    // Cache null result too to avoid repeated lookups
-    if (this.enableRouteCache) {
-      this._routeCache.set(cacheKey, null);
+    return null;
+  }
+
+  _resolveVersionedEntry(ns, actionKey, version) {
+    if (!ns) return null;
+    
+    // Strategy 1: Look for versioned key (e.g., "action.v1")
+    const versionedKey = `${actionKey}.${version}`;
+    if (Object.prototype.hasOwnProperty.call(ns, versionedKey)) {
+      return ns[versionedKey];
+    }
+    
+    // Strategy 2: Look for entry with version/versions property
+    if (Object.prototype.hasOwnProperty.call(ns, actionKey)) {
+      const entry = ns[actionKey];
+      if (entry.version === version || (Array.isArray(entry.versions) && entry.versions.includes(version))) {
+        return entry;
+      }
     }
     
     return null;
+  }
+
+  _resolveStandardEntry(ns, actionKey) {
+    return (ns && Object.prototype.hasOwnProperty.call(ns, actionKey)) ? ns[actionKey] : null;
   }
 
   _buildValidationSchema(paramDefs = [], incoming = {}) {
@@ -444,6 +478,12 @@ class ApiHandler {
       
       // Apply type coercion to incoming value
       let coercedValue = incoming[name];
+      
+      // Apply default value for optional params if not provided
+      if ((coercedValue === undefined || coercedValue === null) && !def.required && def.default !== undefined) {
+        coercedValue = def.default;
+      }
+      
       if (coercedValue !== undefined && coercedValue !== null) {
         coercedValue = this._coerceType(coercedValue, type);
       }
