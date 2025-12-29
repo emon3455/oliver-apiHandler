@@ -31,7 +31,16 @@ class ApiHandler {
     parallelHandlers = false,
     timestampFn = null
   }) {
-    this._validateRouteConfig(routeConfig);
+    try {
+      this._validateRouteConfig(routeConfig);
+    } catch (err) {
+      ErrorHandler.addError(`ApiHandler constructor validation failed: ${err.message}`, {
+        code: "CONSTRUCTOR_VALIDATION_FAILED",
+        origin: "ApiHandler.constructor",
+        data: { error: err.message }
+      });
+      throw new Error(`ApiHandler constructor validation failed: ${err.message}`);
+    }
     this.routeConfig = routeConfig;
     this.autoLoader = autoLoader;
     this.logFlagOk = logFlagOk;
@@ -71,7 +80,11 @@ class ApiHandler {
         await result;
       }
     } catch (err) {
-      console.error('[ApiHandler] Failed to load core utilities:', err.message);
+      ErrorHandler.addError(`Failed to load core utilities: ${err.message}`, {
+        code: "CORE_UTILITIES_FAILED",
+        origin: "ApiHandler._initCoreUtilities",
+        data: { error: String(err), at: this.timestampFn() }
+      });
       await this._safeLogWrite({ 
         flag: this.logFlagError, 
         action: "api.core_utilities_failed", 
@@ -84,20 +97,44 @@ class ApiHandler {
 
   _validateRouteConfig(routeConfig) {
     if (!routeConfig || typeof routeConfig !== "object") {
+      ErrorHandler.addError(`routeConfig must be a valid object. Received: ${typeof routeConfig}`, {
+        code: "INVALID_ROUTE_CONFIG_TYPE",
+        origin: "ApiHandler._validateRouteConfig",
+        data: { receivedType: typeof routeConfig }
+      });
       throw new TypeError("routeConfig must be a valid object. Received: " + typeof routeConfig);
     }
     if (!routeConfig.apiHandler) {
+      ErrorHandler.addError('routeConfig.apiHandler is required but was not provided', {
+        code: "MISSING_API_HANDLER",
+        origin: "ApiHandler._validateRouteConfig",
+        data: {}
+      });
       throw new TypeError("routeConfig.apiHandler is required but was not provided");
     }
     if (!Array.isArray(routeConfig.apiHandler)) {
+      ErrorHandler.addError(`routeConfig.apiHandler must be an array. Received: ${typeof routeConfig.apiHandler}`, {
+        code: "INVALID_API_HANDLER_TYPE",
+        origin: "ApiHandler._validateRouteConfig",
+        data: { receivedType: typeof routeConfig.apiHandler }
+      });
       throw new TypeError("routeConfig.apiHandler must be an array. Received: " + typeof routeConfig.apiHandler);
     }
     if (routeConfig.apiHandler.length === 0) {
-      console.warn('[ApiHandler] Warning: routeConfig.apiHandler is empty - no routes configured');
+      ErrorHandler.addError('routeConfig.apiHandler is empty - no routes configured', {
+        code: "EMPTY_ROUTE_CONFIG",
+        origin: "ApiHandler._validateRouteConfig",
+        data: {}
+      });
     }
     for (let i = 0; i < routeConfig.apiHandler.length; i++) {
       const group = routeConfig.apiHandler[i];
       if (!group || typeof group !== "object") {
+        ErrorHandler.addError(`Each route group must be a valid object. Group at index ${i} is invalid: ${typeof group}`, {
+          code: "INVALID_ROUTE_GROUP",
+          origin: "ApiHandler._validateRouteConfig",
+          data: { groupIndex: i, receivedType: typeof group }
+        });
         throw new TypeError(`Each route group must be a valid object. Group at index ${i} is invalid: ` + typeof group);
       }
     }
@@ -110,9 +147,18 @@ class ApiHandler {
     } catch (err) {
       // Last-resort error handler for unexpected exceptions outside normal flow
       const message = `Unexpected API handler exception: ${err?.message || err}`;
-      console.error('[ApiHandler] CRITICAL: Unhandled exception in handleRootApi:', err);
+      ErrorHandler.addError(message, {
+        code: "CRITICAL_UNHANDLED_EXCEPTION",
+        origin: "ApiHandler.handleRootApi",
+        data: { 
+          error: String(err), 
+          stack: err?.stack,
+          method,
+          at: Date.now() 
+        }
+      });
       
-      this.logger.writeLog({ 
+      await this._safeLogWrite({ 
         flag: this.logFlagError, 
         action: "api.critical_unhandled_exception", 
         message, 
@@ -161,6 +207,11 @@ class ApiHandler {
         : '';
       const message = `Method ${normalizedMethod} not allowed. Supported methods: ${this.allowedMethods.join(', ')}${hint}`;
       this._debugLog(`❌ [ApiHandler] [${requestId}] Method not allowed: ${normalizedMethod}`);
+      ErrorHandler.addError(message, {
+        code: "METHOD_NOT_ALLOWED",
+        origin: "ApiHandler._handleRootApiInternal",
+        data: { method: normalizedMethod, allowedMethods: this.allowedMethods, requestId }
+      });
       errorHandler.add(message, { method: normalizedMethod, allowedMethods: this.allowedMethods }, 'method_validation');
       await this._safeLogWrite({ flag: this.logFlagError, action: "api.method_not_allowed", message, critical: false, data: { method: normalizedMethod, requestId, at: requestTimestamp } });
       return this._errorResponse(405, message, errorHandler.getAll(), 'METHOD_NOT_ALLOWED', requestId);
@@ -181,6 +232,11 @@ class ApiHandler {
     if (!namespace || namespace.length === 0 || !actionKey || actionKey.length === 0) {
       const message = "Missing or empty routing fields: 'namespace' and/or 'action' must be non-empty strings";
       this._debugLog(`❌ [ApiHandler] [${requestId}] Invalid routing fields:`, { namespace, actionKey });
+      ErrorHandler.addError(message, {
+        code: "MISSING_ROUTE_FIELDS",
+        origin: "ApiHandler._handleRootApiInternal",
+        data: { namespace, actionKey, version, requestId }
+      });
       errorHandler.add(message, { namespace, actionKey, version }, 'routing');
       await this._safeLogWrite({ flag: this.logFlagError, action: "api.route_fields_missing", message, critical: true, data: { method, requestId, at: requestTimestamp } });
       return this._errorResponse(400, message, errorHandler.getAll(), 'MISSING_ROUTE_FIELDS', requestId);
@@ -200,6 +256,11 @@ class ApiHandler {
     if (!resolved) {
       const message = `API route not found for ${routeIdentifier}`;
       this._debugLog(`❌ [ApiHandler] [${requestId}] Route not found: ${routeIdentifier}`);
+      ErrorHandler.addError(message, {
+        code: "ROUTE_NOT_FOUND",
+        origin: "ApiHandler._handleRootApiInternal",
+        data: { namespace, actionKey, version, requestId }
+      });
       errorHandler.add(message, { namespace, actionKey, version }, 'routing');
       await this._safeLogWrite({ flag: this.logFlagError, action: "api.route_not_found", message, critical: true, data: { namespace, actionKey, version, method, requestId, at: requestTimestamp } });
       return this._errorResponse(404, message, null, 'ROUTE_NOT_FOUND', requestId);
@@ -210,6 +271,11 @@ class ApiHandler {
     // Validate entry structure
     if (!entry || typeof entry !== "object") {
       const message = `Invalid route entry structure for ${namespace}/${actionKey}`;
+      ErrorHandler.addError(message, {
+        code: "INVALID_ROUTE_ENTRY",
+        origin: "ApiHandler._handleRootApiInternal",
+        data: { namespace, actionKey }
+      });
       errorHandler.add(message, { namespace, actionKey }, 'configuration');
       await this._safeLogWrite({ flag: this.logFlagError, action: "api.invalid_route_entry", message, critical: true, data: { namespace, actionKey, at: requestTimestamp } });
       return this._errorResponse(500, message, errorHandler.getAll(), 'INVALID_ROUTE_ENTRY', requestId);
@@ -240,6 +306,11 @@ class ApiHandler {
       } catch (err) {
         const sanitizedError = this._sanitizeErrorMessage(err);
         const message = `Pre-validation middleware failed: ${sanitizedError}`;
+        ErrorHandler.addError(message, {
+          code: "MIDDLEWARE_FAILED",
+          origin: "ApiHandler._handleRootApiInternal",
+          data: { namespace, actionKey, error: sanitizedError, requestId }
+        });
         errorHandler.add(message, { namespace, actionKey }, 'middleware');
         await this._safeLogWrite({ flag: this.logFlagError, action: "api.middleware_failed", message, critical: true, data: { namespace, actionKey, requestId, error: sanitizedError, at: requestTimestamp } });
         return this._errorResponse(500, message, errorHandler.getAll(), 'MIDDLEWARE_FAILED', requestId);
@@ -262,6 +333,11 @@ class ApiHandler {
       const sanitizedError = this._sanitizeErrorMessage(err);
       const message = `Validation failed for ${routeIdentifier}: ${sanitizedError}`;
       this._debugLog(`❌ [ApiHandler] [${requestId}] Validation failed:`, sanitizedError);
+      ErrorHandler.addError(message, {
+        code: "VALIDATION_FAILED",
+        origin: "ApiHandler._handleRootApiInternal",
+        data: { namespace, actionKey, error: sanitizedError, requestId }
+      });
       errorHandler.add(message, { namespace, actionKey }, 'validation');
       await this._safeLogWrite({ flag: this.logFlagError, action: "api.validation_failed", message, critical: true, data: { namespace, actionKey, requestId, error: sanitizedError, at: requestTimestamp } });
       return this._errorResponse(400, message, errorHandler.getAll(), 'VALIDATION_FAILED', requestId);
@@ -281,7 +357,7 @@ class ApiHandler {
       try {
         ({ handlerFns } = this.autoLoader.ensureRouteDependencies(entry));
         if (attempt > 0) {
-          console.log(`✅ [ApiHandler] Dependencies loaded on attempt ${attempt + 1}`);
+          this._debugLog(`✅ [ApiHandler] Dependencies loaded on attempt ${attempt + 1}`);
         }
         break; // Success, exit retry loop
       } catch (err) {
@@ -298,6 +374,11 @@ class ApiHandler {
     if (!handlerFns) {
       const sanitizedError = this._sanitizeErrorMessage(lastError);
       const message = `Failed to load route dependencies for ${routeIdentifier} after ${this.dependencyRetries + 1} attempts: ${sanitizedError}`;
+      ErrorHandler.addError(message, {
+        code: "AUTOLOAD_FAILED",
+        origin: "ApiHandler._handleRootApiInternal",
+        data: { namespace, actionKey, attempts: this.dependencyRetries + 1, error: sanitizedError, requestId }
+      });
       errorHandler.add(message, { namespace, actionKey, attempts: this.dependencyRetries + 1 }, 'dependencies');
       await this._safeLogWrite({ flag: this.logFlagError, action: "api.autoload_failed", message, critical: true, data: { namespace, actionKey, requestId, error: sanitizedError, attempts: this.dependencyRetries + 1, at: requestTimestamp } });
       return this._errorResponse(500, message, errorHandler.getAll(), 'AUTOLOAD_FAILED', requestId);
@@ -434,16 +515,33 @@ class ApiHandler {
     for (const def of paramDefs) {
       // Validate each param definition structure
       if (!def || typeof def !== "object") {
+        ErrorHandler.addError('Each param definition must be a valid object', {
+          code: "INVALID_PARAM_DEFINITION",
+          origin: "ApiHandler._buildValidationSchema",
+          data: { receivedType: typeof def }
+        });
         throw new TypeError("Each param definition must be a valid object");
       }
       
       const name = String(def.name || "").trim();
-      if (!name) throw new TypeError("Param definition missing name");
+      if (!name) {
+        ErrorHandler.addError('Param definition missing name', {
+          code: "MISSING_PARAM_NAME",
+          origin: "ApiHandler._buildValidationSchema",
+          data: { def }
+        });
+        throw new TypeError("Param definition missing name");
+      }
       
       const type = String(def.type || "string").trim().toLowerCase();
       
       // Validate type is supported
       if (!validTypes.includes(type)) {
+        ErrorHandler.addError(`Invalid param type "${type}" for "${name}". Must be one of: ${validTypes.join(', ')}`, {
+          code: "INVALID_PARAM_TYPE",
+          origin: "ApiHandler._buildValidationSchema",
+          data: { paramName: name, invalidType: type, validTypes }
+        });
         throw new TypeError(`Invalid param type "${type}" for "${name}". Must be one of: ${validTypes.join(', ')}`);
       }
       
@@ -701,7 +799,11 @@ class ApiHandler {
       }
     } catch (err) {
       // Fallback if logger fails - don't let logging errors crash the app
-      console.error('[ApiHandler] Logger failed:', err.message);
+      ErrorHandler.addError(`Logger failed: ${err.message}`, {
+        code: "LOGGER_FAILED",
+        origin: "ApiHandler._safeLogWrite",
+        data: { error: err.message }
+      });
     }
   }
 
@@ -815,6 +917,11 @@ class ApiHandler {
         const handlerDuration = this.timestampFn() - handlerStartTime;
         const sanitizedError = this._sanitizeErrorMessage(err);
         const message = `Handler ${i + 1} (${fn.name || 'anonymous'}) exception for ${namespace}/${actionKey}: ${sanitizedError}`;
+        ErrorHandler.addError(message, {
+          code: "HANDLER_EXCEPTION",
+          origin: "ApiHandler._executeHandlersSerial",
+          data: { namespace, actionKey, handlerIndex: i, handlerName: fn.name || 'anonymous', duration: handlerDuration, error: sanitizedError }
+        });
         errorHandler.add(message, { namespace, actionKey, handlerIndex: i, handlerName: fn.name || 'anonymous', duration: handlerDuration }, 'handler_execution');
         await this._safeLogWrite({ flag: this.logFlagError, action: "api.handler_exception", message, critical: true, data: { namespace, actionKey, handlerIndex: i, error: sanitizedError, duration: handlerDuration, at: requestTimestamp } });
         return { ...this._errorResponse(500, message, errorHandler.getAll(), 'HANDLER_EXCEPTION', requestId), _isErrorResponse: true };
@@ -855,6 +962,11 @@ class ApiHandler {
     const failedHandler = results.find(r => !r.success);
     if (failedHandler) {
       const message = `Handler ${failedHandler.index + 1} (${failedHandler.handlerName}) exception: ${failedHandler.error}`;
+      ErrorHandler.addError(message, {
+        code: "HANDLER_EXCEPTION",
+        origin: "ApiHandler._executeHandlersParallel",
+        data: { namespace, actionKey, handlerIndex: failedHandler.index, handlerName: failedHandler.handlerName, error: failedHandler.error }
+      });
       errorHandler.add(message, { namespace, actionKey, handlerIndex: failedHandler.index }, 'handler_execution');
       await this._safeLogWrite({ flag: this.logFlagError, action: "api.handler_exception", message, critical: true, data: { namespace, actionKey, handlerIndex: failedHandler.index, error: failedHandler.error, at: requestTimestamp } });
       return { ...this._errorResponse(500, message, errorHandler.getAll(), 'HANDLER_EXCEPTION', requestId), _isErrorResponse: true };

@@ -1,54 +1,103 @@
+/*
+ * Methods:
+ *    addError() — Add an error entry to the error log.
+ *    hasErrors() — Check if any errors have been logged.
+ *    getAllErrors() — Retrieve all logged errors.
+ *    clear() — Clear all logged errors.
+ */
+
+"use strict";
+
+/**
+ * Class ErrorHandler
+ *
+ * Handles error logging, storage, and retrieval for the application.
+ *
+ * @link https://docs.example.com/ErrorHandler #TODO
+ */
 class ErrorHandler {
-  // Store the error records
+  /**
+   * Static array to store error entries.
+   *
+   * @type {Array<object>}
+   */
   static errors = [];
 
   /**
-  Adds an error message and optional data to the error list
-  @since 1.0
-  @version 1.0
-  @author Linden May
-  @param {string} message - The error message to record
-  @param {any} [data=null] - Optional additional error data
-  @returns {void} No return value
-  */
-  static add_error(message, data = null) {
-    // Add the error message and data to the errors array
-    this.errors.push({ message, data });
+   * Add an error entry to the error log.
+   *
+   * Creates a timestamp and stores the error message with additional data.
+   *
+   * @author Linden May
+   * @version 1.0.0
+   * @since -
+   * @updated -
+   * @link https://docs.example.com/ErrorHandler#addError #TODO
+   *
+   * @param {string} message - The error message to log.
+   * @param {object} [data={}] - Optional additional error details.
+   *
+   * @returns {void} Logs the error in the internal array.
+   */
+  static addError(message, data = {}) {
+    // Create a timestamp for the error
+    const timestamp = new Date().toISOString();
+
+    // Insert the error entry into the errors array
+    this.errors.push({ message, data, timestamp });
   }
 
   /**
-  Checks if any errors have been recorded
-  @since 1.0
-  @version 1.0
-  @author Linden May
-  @returns {boolean} True if errors array is not empty
-  */
-  static has_errors() {
-    // Check if the errors array has any items
+   * Check if any errors have been logged.
+   *
+   * Returns a boolean indicating whether the error log contains entries.
+   *
+   * @author Linden May
+   * @version 1.0.0
+   * @since -
+   * @updated -
+   * @link https://docs.example.com/ErrorHandler#hasErrors #TODO
+   *
+   * @returns {boolean} True if there are logged errors, false otherwise.
+   */
+  static hasErrors() {
+    // Return true if there are any logged errors
     return this.errors.length > 0;
   }
 
   /**
-  Retrieves all recorded error messages
-  @since 1.0
-  @version 1.0
-  @author Linden May
-  @returns {Array<object>} Array of error objects
-  */
-  static get_all_errors() {
-    // Return all error objects
+   * Retrieve all logged errors.
+   *
+   * Returns the full list of recorded error objects.
+   *
+   * @author Linden May
+   * @version 1.0.0
+   * @since -
+   * @updated -
+   * @link https://docs.example.com/ErrorHandler#getAllErrors #TODO
+   *
+   * @returns {Array} An array containing all logged error entries.
+   */
+  static getAllErrors() {
+    // Return the complete list of logged errors
     return this.errors;
   }
 
   /**
-  Clears all recorded errors
-  @since 1.0
-  @version 1.0
-  @author Linden May
-  @returns {void} No return value
-  */
+   * Clear all logged errors.
+   *
+   * Resets the internal errors array to an empty state.
+   *
+   * @author Linden May
+   * @version 1.0.0
+   * @since -
+   * @updated -
+   * @link https://docs.example.com/ErrorHandler#clear #TODO
+   *
+   * @returns {void} Empties the stored error logs.
+   */
   static clear() {
-    // Clear the errors array
+    // Reset the errors array to an empty list
     this.errors = [];
   }
 }
