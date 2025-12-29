@@ -1,33 +1,17 @@
 const ErrorHandler = require("./ErrorHandler.js");
 const Logger = require("./UtilityLogger.js");
 const SafeUtils = require("./SafeUtils.js");
+const crypto = require('crypto');
 
-// Symbol-based private method keys for true privacy
-// These are truly private and cannot be accessed from outside the module
-const _privateSymbols = {
-  validateRouteConfig: Symbol('validateRouteConfig'),
-  initCoreUtilities: Symbol('initCoreUtilities'),
-  handleRootApiInternal: Symbol('handleRootApiInternal'),
-  resolveRouteFromArgs: Symbol('resolveRouteFromArgs'),
-  findNamespace: Symbol('findNamespace'),
-  resolveVersionedEntry: Symbol('resolveVersionedEntry'),
-  resolveStandardEntry: Symbol('resolveStandardEntry'),
-  buildValidationSchema: Symbol('buildValidationSchema'),
-  sanitizeExtraArgs: Symbol('sanitizeExtraArgs'),
-  collectIncomingArgs: Symbol('collectIncomingArgs'),
-  deepClone: Symbol('deepClone'),
-  coerceType: Symbol('coerceType'),
-  validateHandlerResponse: Symbol('validateHandlerResponse'),
-  sanitizeForLogging: Symbol('sanitizeForLogging'),
-  debugLog: Symbol('debugLog'),
-  safeLogWrite: Symbol('safeLogWrite'),
-  sanitizeErrorMessage: Symbol('sanitizeErrorMessage'),
-  stripInternalMetadata: Symbol('stripInternalMetadata'),
-  executeHandlersSerial: Symbol('executeHandlersSerial'),
-  executeHandlersParallel: Symbol('executeHandlersParallel'),
-  executeHandlerWithTimeout: Symbol('executeHandlerWithTimeout'),
-  errorResponse: Symbol('errorResponse')
-};
+// Default configuration constants
+const DEFAULT_CONFIG = Object.freeze({
+  HANDLER_TIMEOUT_MS: 30000,
+  MAX_RETRIES: 2,
+  RETRY_DELAY_MS: 100,
+  MAX_ROUTE_CACHE_SIZE: 1000,
+  MAX_SANITIZE_DEPTH: 5,
+  REQUEST_ID_BYTES: 8
+});
 
 class ApiHandler {
   constructor({ 
@@ -37,12 +21,12 @@ class ApiHandler {
     logFlagError = "startup", 
     allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'], 
     preValidationMiddleware = null, 
-    dependencyRetries = 2,
+    dependencyRetries = DEFAULT_CONFIG.MAX_RETRIES,
     logger = Logger,
     safeUtils = SafeUtils,
     enableRouteCache = true,
     enableVersioning = false,
-    handlerTimeout = 30000, // 30 seconds default
+    handlerTimeout = DEFAULT_CONFIG.HANDLER_TIMEOUT_MS,
     debugMode = false,
     parallelHandlers = false,
     timestampFn = null
@@ -55,7 +39,8 @@ class ApiHandler {
     this.allowedMethods = allowedMethods;
     this.preValidationMiddleware = preValidationMiddleware;
     this.dependencyRetries = dependencyRetries;
-    this._paramDefsCache = new WeakMap(); // Cache for allowed keys Set
+    this._paramDefsCache = new Map(); // Cache for allowed keys Set
+    this.maxRouteCacheSize = DEFAULT_CONFIG.MAX_ROUTE_CACHE_SIZE;
     
     // New configuration options
     this.enableRouteCache = enableRouteCache;
@@ -76,31 +61,6 @@ class ApiHandler {
     if (this.autoLoader && typeof this.autoLoader.loadCoreUtilities === "function") {
       this._initCoreUtilities();
     }
-    
-    // Create Symbol-based aliases for truly private methods
-    // These cannot be accessed from outside the module scope
-    this[_privateSymbols.validateRouteConfig] = this._validateRouteConfig.bind(this);
-    this[_privateSymbols.initCoreUtilities] = this._initCoreUtilities.bind(this);
-    this[_privateSymbols.handleRootApiInternal] = this._handleRootApiInternal.bind(this);
-    this[_privateSymbols.resolveRouteFromArgs] = this._resolveRouteFromArgs.bind(this);
-    this[_privateSymbols.findNamespace] = this._findNamespace.bind(this);
-    this[_privateSymbols.resolveVersionedEntry] = this._resolveVersionedEntry.bind(this);
-    this[_privateSymbols.resolveStandardEntry] = this._resolveStandardEntry.bind(this);
-    this[_privateSymbols.buildValidationSchema] = this._buildValidationSchema.bind(this);
-    this[_privateSymbols.sanitizeExtraArgs] = this._sanitizeExtraArgs.bind(this);
-    this[_privateSymbols.collectIncomingArgs] = this._collectIncomingArgs.bind(this);
-    this[_privateSymbols.deepClone] = this._deepClone.bind(this);
-    this[_privateSymbols.coerceType] = this._coerceType.bind(this);
-    this[_privateSymbols.validateHandlerResponse] = this._validateHandlerResponse.bind(this);
-    this[_privateSymbols.sanitizeForLogging] = this._sanitizeForLogging.bind(this);
-    this[_privateSymbols.debugLog] = this._debugLog.bind(this);
-    this[_privateSymbols.safeLogWrite] = this._safeLogWrite.bind(this);
-    this[_privateSymbols.sanitizeErrorMessage] = this._sanitizeErrorMessage.bind(this);
-    this[_privateSymbols.stripInternalMetadata] = this._stripInternalMetadata.bind(this);
-    this[_privateSymbols.executeHandlersSerial] = this._executeHandlersSerial.bind(this);
-    this[_privateSymbols.executeHandlersParallel] = this._executeHandlersParallel.bind(this);
-    this[_privateSymbols.executeHandlerWithTimeout] = this._executeHandlerWithTimeout.bind(this);
-    this[_privateSymbols.errorResponse] = this._errorResponse.bind(this);
   }
 
   async _initCoreUtilities() {
@@ -174,8 +134,9 @@ class ApiHandler {
     const requestTimestamp = this.timestampFn();
     const requestStartTime = requestTimestamp;
     
-    // Generate unique request ID for tracing
-    const requestId = `req_${requestTimestamp}_${Math.random().toString(36).substr(2, 9)}`;
+    // Generate unique request ID for tracing (crypto-based for collision resistance)
+    const randomHex = crypto.randomBytes(DEFAULT_CONFIG.REQUEST_ID_BYTES).toString('hex');
+    const requestId = `req_${requestTimestamp}_${randomHex}`;
     
     // Create request-scoped error handler with categorization
     const errorHandler = { errors: [] };
@@ -202,7 +163,7 @@ class ApiHandler {
       this._debugLog(`❌ [ApiHandler] [${requestId}] Method not allowed: ${normalizedMethod}`);
       errorHandler.add(message, { method: normalizedMethod, allowedMethods: this.allowedMethods }, 'method_validation');
       await this._safeLogWrite({ flag: this.logFlagError, action: "api.method_not_allowed", message, critical: false, data: { method: normalizedMethod, requestId, at: requestTimestamp } });
-      return this._errorResponse(405, message, errorHandler.getAll());
+      return this._errorResponse(405, message, errorHandler.getAll(), 'METHOD_NOT_ALLOWED', requestId);
     }
 
     const args = this._collectIncomingArgs(method, query, body);
@@ -222,16 +183,26 @@ class ApiHandler {
       this._debugLog(`❌ [ApiHandler] [${requestId}] Invalid routing fields:`, { namespace, actionKey });
       errorHandler.add(message, { namespace, actionKey, version }, 'routing');
       await this._safeLogWrite({ flag: this.logFlagError, action: "api.route_fields_missing", message, critical: true, data: { method, requestId, at: requestTimestamp } });
-      return this._errorResponse(400, message, errorHandler.getAll());
+      return this._errorResponse(400, message, errorHandler.getAll(), 'MISSING_ROUTE_FIELDS', requestId);
     }
 
     const resolved = this._resolveRouteFromArgs(namespace, actionKey, version);
+    
+    // LRU cache management (Issue #9)
+    if (resolved && this._routeCache && this._routeCache.size >= this.maxRouteCacheSize) {
+      // Remove oldest entry (first key in Map maintains insertion order)
+      const firstKey = this._routeCache.keys().next().value;
+      if (firstKey) {
+        this._routeCache.delete(firstKey);
+      }
+    }
+    
     if (!resolved) {
       const message = `API route not found for ${routeIdentifier}`;
       this._debugLog(`❌ [ApiHandler] [${requestId}] Route not found: ${routeIdentifier}`);
       errorHandler.add(message, { namespace, actionKey, version }, 'routing');
       await this._safeLogWrite({ flag: this.logFlagError, action: "api.route_not_found", message, critical: true, data: { namespace, actionKey, version, method, requestId, at: requestTimestamp } });
-      return this._errorResponse(404, message);
+      return this._errorResponse(404, message, null, 'ROUTE_NOT_FOUND', requestId);
     }
     this._debugLog(`✅ [ApiHandler] [${requestId}] Route resolved: ${routeIdentifier}`);
     const { entry } = resolved;
@@ -241,7 +212,7 @@ class ApiHandler {
       const message = `Invalid route entry structure for ${namespace}/${actionKey}`;
       errorHandler.add(message, { namespace, actionKey }, 'configuration');
       await this._safeLogWrite({ flag: this.logFlagError, action: "api.invalid_route_entry", message, critical: true, data: { namespace, actionKey, at: requestTimestamp } });
-      return this._errorResponse(500, message, errorHandler.getAll());
+      return this._errorResponse(500, message, errorHandler.getAll(), 'INVALID_ROUTE_ENTRY', requestId);
     }
 
     // Execute pre-validation middleware if configured
@@ -264,14 +235,14 @@ class ApiHandler {
         // Allow middleware to short-circuit the request
         if (middlewareResult && middlewareResult.abort === true) {
           this._debugLog(`🛑 [ApiHandler] [${requestId}] Pre-validation middleware aborted request`);
-          return middlewareResult.response || this._errorResponse(403, 'Request blocked by middleware');
+          return middlewareResult.response || this._errorResponse(403, 'Request blocked by middleware', null, 'MIDDLEWARE_BLOCKED', requestId);
         }
       } catch (err) {
         const sanitizedError = this._sanitizeErrorMessage(err);
         const message = `Pre-validation middleware failed: ${sanitizedError}`;
         errorHandler.add(message, { namespace, actionKey }, 'middleware');
         await this._safeLogWrite({ flag: this.logFlagError, action: "api.middleware_failed", message, critical: true, data: { namespace, actionKey, requestId, error: sanitizedError, at: requestTimestamp } });
-        return this._errorResponse(500, message, errorHandler.getAll());
+        return this._errorResponse(500, message, errorHandler.getAll(), 'MIDDLEWARE_FAILED', requestId);
       }
     }
 
@@ -293,7 +264,7 @@ class ApiHandler {
       this._debugLog(`❌ [ApiHandler] [${requestId}] Validation failed:`, sanitizedError);
       errorHandler.add(message, { namespace, actionKey }, 'validation');
       await this._safeLogWrite({ flag: this.logFlagError, action: "api.validation_failed", message, critical: true, data: { namespace, actionKey, requestId, error: sanitizedError, at: requestTimestamp } });
-      return this._errorResponse(400, message, errorHandler.getAll());
+      return this._errorResponse(400, message, errorHandler.getAll(), 'VALIDATION_FAILED', requestId);
     }
 
     this._debugLog(`🔍 [ApiHandler] [${requestId}] Sanitizing extra arguments...`);
@@ -329,7 +300,7 @@ class ApiHandler {
       const message = `Failed to load route dependencies for ${routeIdentifier} after ${this.dependencyRetries + 1} attempts: ${sanitizedError}`;
       errorHandler.add(message, { namespace, actionKey, attempts: this.dependencyRetries + 1 }, 'dependencies');
       await this._safeLogWrite({ flag: this.logFlagError, action: "api.autoload_failed", message, critical: true, data: { namespace, actionKey, requestId, error: sanitizedError, attempts: this.dependencyRetries + 1, at: requestTimestamp } });
-      return this._errorResponse(500, message, errorHandler.getAll());
+      return this._errorResponse(500, message, errorHandler.getAll(), 'AUTOLOAD_FAILED', requestId);
     }
 
     // Deep-clone pipelineInput to isolate handler context and prevent mutations
@@ -494,15 +465,18 @@ class ApiHandler {
   }
 
   _sanitizeExtraArgs(paramDefs = [], incoming = {}, validated = {}) {
-    // Use cached Set if available to avoid recreation on every request
+    // Use cached Set with stable string keys (Issue #15)
     let allowed;
     if (Array.isArray(paramDefs) && paramDefs.length > 0) {
+      // Create stable cache key from parameter definitions
+      const cacheKey = paramDefs.map(d => `${d.name}:${d.type}`).join('|');
+      
       // Try to get cached Set
-      if (!this._paramDefsCache.has(paramDefs)) {
+      if (!this._paramDefsCache.has(cacheKey)) {
         allowed = new Set(paramDefs.map((d) => String(d.name)));
-        this._paramDefsCache.set(paramDefs, allowed);
+        this._paramDefsCache.set(cacheKey, allowed);
       } else {
-        allowed = this._paramDefsCache.get(paramDefs);
+        allowed = this._paramDefsCache.get(cacheKey);
       }
     } else {
       allowed = new Set();
@@ -538,20 +512,9 @@ class ApiHandler {
     const q = query && typeof query === "object" ? query : {};
     const b = body && typeof body === "object" ? body : {};
     
-    // Prevent prototype pollution by filtering dangerous keys
-    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
-    const filterDangerousKeys = (obj) => {
-      const filtered = {};
-      for (const key in obj) {
-        if (Object.prototype.hasOwnProperty.call(obj, key) && !dangerousKeys.includes(key)) {
-          filtered[key] = obj[key];
-        }
-      }
-      return filtered;
-    };
-    
-    const safeQuery = filterDangerousKeys(q);
-    const safeBody = filterDangerousKeys(b);
+    // Use deep sanitization for complete prototype pollution protection (Issue #3)
+    const safeQuery = this.safeUtils.sanitizeDeep(q);
+    const safeBody = this.safeUtils.sanitizeDeep(b);
     
     // HEAD behaves like GET - query params only
     if (m === "GET" || m === "HEAD") return safeQuery;
@@ -559,11 +522,17 @@ class ApiHandler {
     return safeQuery;
   }
 
-  _deepClone(obj) {
+  _deepClone(obj, seen = new WeakSet()) {
     // Handle primitives and null
     if (obj === null || typeof obj !== 'object') {
       return obj;
     }
+    
+    // Circular reference detection (Issue #8)
+    if (seen.has(obj)) {
+      return '[Circular]';
+    }
+    seen.add(obj);
     
     // Handle Date
     if (obj instanceof Date) {
@@ -572,15 +541,16 @@ class ApiHandler {
     
     // Handle Array
     if (Array.isArray(obj)) {
-      return obj.map(item => this._deepClone(item));
+      return obj.map(item => this._deepClone(item, seen));
     }
     
     // Handle plain objects
     if (Object.prototype.toString.call(obj) === '[object Object]') {
       const cloned = {};
+      // Use for...in for better performance (Issue #14)
       for (const key in obj) {
         if (Object.prototype.hasOwnProperty.call(obj, key)) {
-          cloned[key] = this._deepClone(obj[key]);
+          cloned[key] = this._deepClone(obj[key], seen);
         }
       }
       return cloned;
@@ -656,11 +626,10 @@ class ApiHandler {
       }
     }
     
-    // Check for circular references that could cause serialization issues
-    try {
-      JSON.stringify(response);
-    } catch (err) {
-      return `Response contains circular references or non-serializable data: ${err.message}`;
+    // Check for circular references using WeakSet (Issue #13)
+    const circularCheck = this._hasCircularReference(response);
+    if (circularCheck) {
+      return 'Response contains circular references';
     }
     
     return null; // Valid
@@ -669,12 +638,24 @@ class ApiHandler {
   _sanitizeForLogging(data) {
     if (data === null || data === undefined) return data;
     
-    // List of sensitive keys to redact
-    const sensitiveKeys = ['password', 'token', 'secret', 'apikey', 'api_key', 'authorization', 'auth', 'credentials', 'creditcard', 'ssn', 'sessionid', 'session_id'];
+    // Expanded list of sensitive keys to redact (Issue #5)
+    const sensitiveKeys = [
+      'password', 'passwd', 'pwd',
+      'token', 'access_token', 'refresh_token', 'id_token', 'bearer',
+      'secret', 'client_secret', 'api_secret', 'secret_key',
+      'apikey', 'api_key', 'key',
+      'authorization', 'auth',
+      'credentials', 'credential',
+      'creditcard', 'credit_card', 'cardnumber', 'cvv', 'cvc',
+      'ssn', 'social_security',
+      'sessionid', 'session_id', 'session',
+      'private_key', 'privatekey',
+      'pin', 'pincode'
+    ];
     
     const sanitize = (obj, depth = 0) => {
       // Prevent infinite recursion
-      if (depth > 5) return '[Max Depth Reached]';
+      if (depth > DEFAULT_CONFIG.MAX_SANITIZE_DEPTH) return '[Max Depth Reached]';
       
       if (typeof obj !== 'object' || obj === null) {
         return obj;
@@ -685,14 +666,18 @@ class ApiHandler {
       }
       
       const sanitized = {};
-      for (const [key, value] of Object.entries(obj)) {
-        const lowerKey = key.toLowerCase();
-        if (sensitiveKeys.some(sk => lowerKey.includes(sk))) {
-          sanitized[key] = '[REDACTED]';
-        } else if (typeof value === 'object' && value !== null) {
-          sanitized[key] = sanitize(value, depth + 1);
-        } else {
-          sanitized[key] = value;
+      // Use for...in for better performance (Issue #14)
+      for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+          const value = obj[key];
+          const lowerKey = key.toLowerCase();
+          if (sensitiveKeys.some(sk => lowerKey.includes(sk))) {
+            sanitized[key] = '[REDACTED]';
+          } else if (typeof value === 'object' && value !== null) {
+            sanitized[key] = sanitize(value, depth + 1);
+          } else {
+            sanitized[key] = value;
+          }
         }
       }
       return sanitized;
@@ -726,11 +711,28 @@ class ApiHandler {
     // Extract message
     let message = err?.message || String(err) || 'Unexpected error occurred';
     
-    // Redact common sensitive patterns from error messages
+    // Enhanced sanitization with multiple patterns (Issue #6)
+    // Basic key=value patterns
     message = message.replace(/password[=:]\s*\S+/gi, 'password=[REDACTED]');
     message = message.replace(/token[=:]\s*\S+/gi, 'token=[REDACTED]');
     message = message.replace(/key[=:]\s*\S+/gi, 'key=[REDACTED]');
     message = message.replace(/secret[=:]\s*\S+/gi, 'secret=[REDACTED]');
+    
+    // URL-encoded patterns
+    message = message.replace(/password%3D[^&\s]+/gi, 'password%3D[REDACTED]');
+    message = message.replace(/token%3D[^&\s]+/gi, 'token%3D[REDACTED]');
+    
+    // Connection strings (e.g., mongodb://user:pass@host)
+    message = message.replace(/:\/\/([^:]+):([^@]+)@/g, '://$1:[REDACTED]@');
+    
+    // Bearer tokens
+    message = message.replace(/Bearer\s+[A-Za-z0-9\-._~+\/]+=*/gi, 'Bearer [REDACTED]');
+    
+    // AWS-style keys (AKIA...)
+    message = message.replace(/AKIA[0-9A-Z]{16}/g, 'AKIA[REDACTED]');
+    
+    // JWT-like patterns (xxx.yyy.zzz)
+    message = message.replace(/\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*\b/g, '[JWT_REDACTED]');
     
     // Limit stack trace exposure in production
     if (!this.debugMode && err?.stack) {
@@ -815,7 +817,7 @@ class ApiHandler {
         const message = `Handler ${i + 1} (${fn.name || 'anonymous'}) exception for ${namespace}/${actionKey}: ${sanitizedError}`;
         errorHandler.add(message, { namespace, actionKey, handlerIndex: i, handlerName: fn.name || 'anonymous', duration: handlerDuration }, 'handler_execution');
         await this._safeLogWrite({ flag: this.logFlagError, action: "api.handler_exception", message, critical: true, data: { namespace, actionKey, handlerIndex: i, error: sanitizedError, duration: handlerDuration, at: requestTimestamp } });
-        return { ...this._errorResponse(500, message, errorHandler.getAll()), _isErrorResponse: true };
+        return { ...this._errorResponse(500, message, errorHandler.getAll(), 'HANDLER_EXCEPTION', requestId), _isErrorResponse: true };
       }
     }
     
@@ -855,7 +857,7 @@ class ApiHandler {
       const message = `Handler ${failedHandler.index + 1} (${failedHandler.handlerName}) exception: ${failedHandler.error}`;
       errorHandler.add(message, { namespace, actionKey, handlerIndex: failedHandler.index }, 'handler_execution');
       await this._safeLogWrite({ flag: this.logFlagError, action: "api.handler_exception", message, critical: true, data: { namespace, actionKey, handlerIndex: failedHandler.index, error: failedHandler.error, at: requestTimestamp } });
-      return { ...this._errorResponse(500, message, errorHandler.getAll()), _isErrorResponse: true };
+      return { ...this._errorResponse(500, message, errorHandler.getAll(), 'HANDLER_EXCEPTION', requestId), _isErrorResponse: true };
     }
     
     // Return last non-undefined result
@@ -875,18 +877,84 @@ class ApiHandler {
       return await fn(input);
     }
     
-    return Promise.race([
-      fn(input),
-      new Promise((_, reject) => {
-        setTimeout(() => {
-          reject(new Error(`Handler ${handlerIndex + 1} (${fn.name || 'anonymous'}) timed out after ${this.handlerTimeout}ms`));
-        }, this.handlerTimeout);
-      })
-    ]);
+    // Fix memory leak by clearing timeout (Issue #7)
+    let timeoutId;
+    try {
+      return await Promise.race([
+        fn(input),
+        new Promise((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error(`Handler ${handlerIndex + 1} (${fn.name || 'anonymous'}) timed out after ${this.handlerTimeout}ms`));
+          }, this.handlerTimeout);
+        })
+      ]);
+    } finally {
+      // Always clear timeout to prevent memory leak
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+    }
   }
 
-  _errorResponse(status, message, details = null) {
-    return { ok: false, status, error: { message, details } };
+  _hasCircularReference(obj, seen = new WeakSet()) {
+    if (obj === null || typeof obj !== 'object') {
+      return false;
+    }
+    
+    if (seen.has(obj)) {
+      return true;
+    }
+    
+    seen.add(obj);
+    
+    if (Array.isArray(obj)) {
+      for (const item of obj) {
+        if (this._hasCircularReference(item, seen)) {
+          return true;
+        }
+      }
+    } else {
+      for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+          if (this._hasCircularReference(obj[key], seen)) {
+            return true;
+          }
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  _deepFreeze(obj) {
+    // Get all property names including non-enumerable ones
+    Object.freeze(obj);
+    
+    Object.getOwnPropertyNames(obj).forEach(prop => {
+      const value = obj[prop];
+      
+      // Recursively freeze nested objects
+      if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+        this._deepFreeze(value);
+      }
+    });
+    
+    return obj;
+  }
+
+  _errorResponse(status, message, details = null, code = null, requestId = null) {
+    // Standardized error format (Issue #16)
+    return {
+      ok: false,
+      status,
+      error: {
+        code: code || `ERROR_${status}`,
+        message,
+        details: details || [],
+        timestamp: this.timestampFn ? this.timestampFn() : Date.now(),
+        requestId: requestId || 'unknown'
+      }
+    };
   }
 }
 

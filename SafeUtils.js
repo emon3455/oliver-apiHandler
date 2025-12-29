@@ -1100,6 +1100,65 @@ static sanitizeHtmlWithWhitelist(input, escapeChars = false) {
     
     return result;
   }
+
+  /**
+   * Deep sanitization for prototype pollution protection.
+   *
+   * Recursively checks and removes dangerous keys like __proto__, constructor, and prototype
+   * at ALL nesting levels to prevent prototype pollution attacks.
+   *
+   * @author Code Audit Fix
+   * @version 1.0.0
+   * @since 1.0.0
+   *
+   * @param {*} obj - Object to sanitize recursively.
+   * @param {number} maxDepth - Maximum recursion depth (default: 10).
+   * @param {number} currentDepth - Current recursion depth (internal use).
+   *
+   * @returns {*} Sanitized object with dangerous keys removed.
+   */
+  static sanitizeDeep(obj, maxDepth = 10, currentDepth = 0) {
+    // Prevent excessive recursion
+    if (currentDepth >= maxDepth) {
+      return '[Max Depth Exceeded]';
+    }
+
+    // Handle primitives and null
+    if (obj === null || typeof obj !== 'object') {
+      return obj;
+    }
+
+    // Dangerous keys that can lead to prototype pollution
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+
+    // Handle arrays
+    if (Array.isArray(obj)) {
+      return obj.map(item => SafeUtils.sanitizeDeep(item, maxDepth, currentDepth + 1));
+    }
+
+    // Handle plain objects
+    const sanitized = {};
+    for (const key in obj) {
+      // Skip dangerous keys
+      if (dangerousKeys.includes(key)) {
+        continue;
+      }
+
+      // Only process own properties
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        const value = obj[key];
+        
+        // Recursively sanitize nested objects/arrays
+        if (value && typeof value === 'object') {
+          sanitized[key] = SafeUtils.sanitizeDeep(value, maxDepth, currentDepth + 1);
+        } else {
+          sanitized[key] = value;
+        }
+      }
+    }
+
+    return sanitized;
+  }
 }
 
 module.exports = SafeUtils;
