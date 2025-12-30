@@ -1,5 +1,4 @@
 const ApiHandler = require('./ApiHandler.js');
-const moment = require('moment');
 
 // Mock dependencies
 const mockLogger = {
