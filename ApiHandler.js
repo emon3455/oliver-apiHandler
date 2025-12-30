@@ -1,5 +1,5 @@
 const ErrorHandler = require("./ErrorHandler.js");
-const Logger = require("./UtilityLogger.js");
+const Logger = require("./Logger.js");
 const SafeUtils = require("./SafeUtils.js");
 const crypto = require('crypto');
 
@@ -86,8 +86,8 @@ class ApiHandler {
         data: { error: String(err), at: this.timestampFn() }
       });
       await this._safeLogWrite({ 
-        flag: this.logFlagError, 
-        action: "api.core_utilities_failed", 
+        flag: "api_core_utilities_failed", 
+        action: "core_utilities_failed", 
         message: `Core utilities initialization failed: ${err?.message || err}`, 
         critical: true, 
         data: { error: String(err), at: this.timestampFn() } 
@@ -159,8 +159,8 @@ class ApiHandler {
       });
       
       await this._safeLogWrite({ 
-        flag: this.logFlagError, 
-        action: "api.critical_unhandled_exception", 
+        flag: "api_critical_unhandled_exception", 
+        action: "critical_unhandled_exception", 
         message, 
         critical: true, 
         data: { 
@@ -213,7 +213,7 @@ class ApiHandler {
         data: { method: normalizedMethod, allowedMethods: this.allowedMethods, requestId }
       });
       errorHandler.add(message, { method: normalizedMethod, allowedMethods: this.allowedMethods }, 'method_validation');
-      await this._safeLogWrite({ flag: this.logFlagError, action: "api.method_not_allowed", message, critical: false, data: { method: normalizedMethod, requestId, at: requestTimestamp } });
+      await this._safeLogWrite({ flag: "api_method_not_allowed", action: "method_not_allowed", message, critical: false, data: { method: normalizedMethod, requestId, at: requestTimestamp } });
       return this._errorResponse(405, message, errorHandler.getAll(), 'METHOD_NOT_ALLOWED', requestId);
     }
 
@@ -238,7 +238,7 @@ class ApiHandler {
         data: { namespace, actionKey, version, requestId }
       });
       errorHandler.add(message, { namespace, actionKey, version }, 'routing');
-      await this._safeLogWrite({ flag: this.logFlagError, action: "api.route_fields_missing", message, critical: true, data: { method, requestId, at: requestTimestamp } });
+      await this._safeLogWrite({ flag: "api_route_fields_missing", action: "route_fields_missing", message, critical: true, data: { method, requestId, at: requestTimestamp } });
       return this._errorResponse(400, message, errorHandler.getAll(), 'MISSING_ROUTE_FIELDS', requestId);
     }
 
@@ -262,7 +262,7 @@ class ApiHandler {
         data: { namespace, actionKey, version, requestId }
       });
       errorHandler.add(message, { namespace, actionKey, version }, 'routing');
-      await this._safeLogWrite({ flag: this.logFlagError, action: "api.route_not_found", message, critical: true, data: { namespace, actionKey, version, method, requestId, at: requestTimestamp } });
+      await this._safeLogWrite({ flag: "api_route_not_found", action: "route_not_found", message, critical: true, data: { namespace, actionKey, version, method, requestId, at: requestTimestamp } });
       return this._errorResponse(404, message, null, 'ROUTE_NOT_FOUND', requestId);
     }
     this._debugLog(`✅ [ApiHandler] [${requestId}] Route resolved: ${routeIdentifier}`);
@@ -277,7 +277,7 @@ class ApiHandler {
         data: { namespace, actionKey }
       });
       errorHandler.add(message, { namespace, actionKey }, 'configuration');
-      await this._safeLogWrite({ flag: this.logFlagError, action: "api.invalid_route_entry", message, critical: true, data: { namespace, actionKey, at: requestTimestamp } });
+      await this._safeLogWrite({ flag: "api_invalid_route_entry", action: "invalid_route_entry", message, critical: true, data: { namespace, actionKey, at: requestTimestamp } });
       return this._errorResponse(500, message, errorHandler.getAll(), 'INVALID_ROUTE_ENTRY', requestId);
     }
 
@@ -312,7 +312,7 @@ class ApiHandler {
           data: { namespace, actionKey, error: sanitizedError, requestId }
         });
         errorHandler.add(message, { namespace, actionKey }, 'middleware');
-        await this._safeLogWrite({ flag: this.logFlagError, action: "api.middleware_failed", message, critical: true, data: { namespace, actionKey, requestId, error: sanitizedError, at: requestTimestamp } });
+        await this._safeLogWrite({ flag: "api_middleware_failed", action: "middleware_failed", message, critical: true, data: { namespace, actionKey, requestId, error: sanitizedError, at: requestTimestamp } });
         return this._errorResponse(500, message, errorHandler.getAll(), 'MIDDLEWARE_FAILED', requestId);
       }
     }
@@ -339,7 +339,7 @@ class ApiHandler {
         data: { namespace, actionKey, error: sanitizedError, requestId }
       });
       errorHandler.add(message, { namespace, actionKey }, 'validation');
-      await this._safeLogWrite({ flag: this.logFlagError, action: "api.validation_failed", message, critical: true, data: { namespace, actionKey, requestId, error: sanitizedError, at: requestTimestamp } });
+      await this._safeLogWrite({ flag: "api_validation_failed", action: "validation_failed", message, critical: true, data: { namespace, actionKey, requestId, error: sanitizedError, at: requestTimestamp } });
       return this._errorResponse(400, message, errorHandler.getAll(), 'VALIDATION_FAILED', requestId);
     }
 
@@ -380,7 +380,7 @@ class ApiHandler {
         data: { namespace, actionKey, attempts: this.dependencyRetries + 1, error: sanitizedError, requestId }
       });
       errorHandler.add(message, { namespace, actionKey, attempts: this.dependencyRetries + 1 }, 'dependencies');
-      await this._safeLogWrite({ flag: this.logFlagError, action: "api.autoload_failed", message, critical: true, data: { namespace, actionKey, requestId, error: sanitizedError, attempts: this.dependencyRetries + 1, at: requestTimestamp } });
+      await this._safeLogWrite({ flag: "api_autoload_failed", action: "autoload_failed", message, critical: true, data: { namespace, actionKey, requestId, error: sanitizedError, attempts: this.dependencyRetries + 1, at: requestTimestamp } });
       return this._errorResponse(500, message, errorHandler.getAll(), 'AUTOLOAD_FAILED', requestId);
     }
 
@@ -424,8 +424,8 @@ class ApiHandler {
     this._debugLog(`✅ [ApiHandler] [${requestId}] Pipeline completed in ${pipelineDuration}ms (total: ${totalDuration}ms)`);
 
     await this._safeLogWrite({
-      flag: this.logFlagOk,
-      action: "api.ok",
+      flag: "api_ok",
+      action: "ok",
       message: `Success: ${routeIdentifier}`,
       critical: false,
       data: { namespace, actionKey, method, requestId, pipelineDuration, totalDuration, at: requestTimestamp }
@@ -923,7 +923,7 @@ class ApiHandler {
           data: { namespace, actionKey, handlerIndex: i, handlerName: fn.name || 'anonymous', duration: handlerDuration, error: sanitizedError }
         });
         errorHandler.add(message, { namespace, actionKey, handlerIndex: i, handlerName: fn.name || 'anonymous', duration: handlerDuration }, 'handler_execution');
-        await this._safeLogWrite({ flag: this.logFlagError, action: "api.handler_exception", message, critical: true, data: { namespace, actionKey, handlerIndex: i, error: sanitizedError, duration: handlerDuration, at: requestTimestamp } });
+        await this._safeLogWrite({ flag: "api_handler_exception", action: "handler_exception", message, critical: true, data: { namespace, actionKey, handlerIndex: i, error: sanitizedError, duration: handlerDuration, at: requestTimestamp } });
         return { ...this._errorResponse(500, message, errorHandler.getAll(), 'HANDLER_EXCEPTION', requestId), _isErrorResponse: true };
       }
     }
@@ -968,7 +968,7 @@ class ApiHandler {
         data: { namespace, actionKey, handlerIndex: failedHandler.index, handlerName: failedHandler.handlerName, error: failedHandler.error }
       });
       errorHandler.add(message, { namespace, actionKey, handlerIndex: failedHandler.index }, 'handler_execution');
-      await this._safeLogWrite({ flag: this.logFlagError, action: "api.handler_exception", message, critical: true, data: { namespace, actionKey, handlerIndex: failedHandler.index, error: failedHandler.error, at: requestTimestamp } });
+      await this._safeLogWrite({ flag: "api_handler_exception", action: "handler_exception", message, critical: true, data: { namespace, actionKey, handlerIndex: failedHandler.index, error: failedHandler.error, at: requestTimestamp } });
       return { ...this._errorResponse(500, message, errorHandler.getAll(), 'HANDLER_EXCEPTION', requestId), _isErrorResponse: true };
     }
     

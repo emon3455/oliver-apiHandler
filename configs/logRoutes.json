@@ -1,0 +1,93 @@
+{
+  "apiHandler": {
+    "retention": "90d",
+    "category": "ApiHandler",
+    "description": "API Handler related logs",
+    "logs": [
+      {
+        "flag": "startup",
+        "path": "apiHandler/startup/startup.log",
+        "critical": true,
+        "PciCompliance": false,
+        "description": "API Handler startup and initialization logs"
+      },
+      {
+        "flag": "api_ok",
+        "path": "apiHandler/success/{action}/success.log",
+        "critical": false,
+        "PciCompliance": false,
+        "description": "Successful API requests"
+      },
+      {
+        "flag": "api_method_not_allowed",
+        "path": "apiHandler/errors/method/{action}/method_not_allowed.log",
+        "critical": false,
+        "PciCompliance": false,
+        "description": "HTTP method not allowed errors"
+      },
+      {
+        "flag": "api_route_fields_missing",
+        "path": "apiHandler/errors/routing/{action}/fields_missing.log",
+        "critical": true,
+        "PciCompliance": false,
+        "description": "Missing namespace or action in request"
+      },
+      {
+        "flag": "api_route_not_found",
+        "path": "apiHandler/errors/routing/{action}/not_found.log",
+        "critical": true,
+        "PciCompliance": false,
+        "description": "Route not found in configuration"
+      },
+      {
+        "flag": "api_invalid_route_entry",
+        "path": "apiHandler/errors/routing/{action}/invalid_entry.log",
+        "critical": true,
+        "PciCompliance": false,
+        "description": "Invalid route entry structure"
+      },
+      {
+        "flag": "api_middleware_failed",
+        "path": "apiHandler/errors/middleware/{action}/failed.log",
+        "critical": true,
+        "PciCompliance": false,
+        "description": "Pre-validation middleware failures"
+      },
+      {
+        "flag": "api_validation_failed",
+        "path": "apiHandler/errors/validation/{action}/failed.log",
+        "critical": true,
+        "PciCompliance": false,
+        "description": "Request parameter validation failures"
+      },
+      {
+        "flag": "api_autoload_failed",
+        "path": "apiHandler/errors/dependencies/{action}/autoload_failed.log",
+        "critical": true,
+        "PciCompliance": false,
+        "description": "Failed to load route dependencies"
+      },
+      {
+        "flag": "api_handler_exception",
+        "path": "apiHandler/errors/handlers/{action}/exception.log",
+        "critical": true,
+        "PciCompliance": false,
+        "description": "Handler execution exceptions"
+      },
+      {
+        "flag": "api_critical_unhandled_exception",
+        "path": "apiHandler/errors/critical/{action}/unhandled.log",
+        "critical": true,
+        "PciCompliance": false,
+        "description": "Critical unhandled exceptions at root handler level"
+      },
+      {
+        "flag": "api_core_utilities_failed",
+        "path": "apiHandler/errors/init/{action}/core_utilities.log",
+        "critical": true,
+        "PciCompliance": false,
+        "description": "Core utilities initialization failures"
+      }
+    ]
+  }
+}
