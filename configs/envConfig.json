@@ -1,44 +1,53 @@
 {
-  "ENVIRONMENT": {
-    "type": "string",
-    "default": "local",
-    "required": true,
-    "description": "Environment name (local, dev, stage, prod)"
-  },
-  "LOGGING_ENABLED": {
-    "type": "boolean",
-    "default": true,
-    "required": true,
-    "description": "Enable or disable logging"
-  },
-  "LOGGING_ENABLE_CONSOLE_LOGS": {
-    "type": "boolean",
-    "default": true,
-    "required": false,
-    "description": "Enable console debug logging"
-  },
-  "LOG_DEBUG_LEVEL": {
-    "type": "string",
-    "default": "debug",
-    "required": false,
-    "description": "Debug log level (trace, debug, info)"
-  },
-  "LOG_LOCAL_ROOT": {
-    "type": "string",
-    "default": "./logs",
-    "required": false,
-    "description": "Local log directory path"
-  },
-  "LOG_EFS_ROOT": {
-    "type": "string",
-    "default": "/mnt/efs/logs",
-    "required": false,
-    "description": "EFS log directory path for remote environments"
-  },
-  "LOG_EFS_CRITICAL_ROOT": {
-    "type": "string",
-    "default": "/mnt/efs/logs/critical",
-    "required": false,
-    "description": "EFS critical log directory path"
-  }
+  "global": [
+    {
+      "name": "ENVIRONMENT",
+      "type": "string",
+      "default": "local",
+      "required": true,
+      "description": "Environment name (local, dev, stage, prod)"
+    },
+    {
+      "name": "LOGGING_ENABLED",
+      "type": "boolean",
+      "default": true,
+      "required": true,
+      "description": "Enable or disable logging"
+    },
+    {
+      "name": "LOGGING_ENABLE_CONSOLE_LOGS",
+      "type": "boolean",
+      "default": true,
+      "required": false,
+      "description": "Enable console debug logging"
+    },
+    {
+      "name": "LOG_DEBUG_LEVEL",
+      "type": "string",
+      "default": "debug",
+      "required": false,
+      "description": "Debug log level (trace, debug, info)"
+    },
+    {
+      "name": "LOG_LOCAL_ROOT",
+      "type": "string",
+      "default": "./logs",
+      "required": false,
+      "description": "Local log directory path"
+    },
+    {
+      "name": "LOG_EFS_ROOT",
+      "type": "string",
+      "default": "/mnt/efs/logs",
+      "required": false,
+      "description": "EFS log directory path for remote environments"
+    },
+    {
+      "name": "LOG_EFS_CRITICAL_ROOT",
+      "type": "string",
+      "default": "/mnt/efs/logs/critical",
+      "required": false,
+      "description": "EFS critical log directory path"
+    }
+  ]
 }

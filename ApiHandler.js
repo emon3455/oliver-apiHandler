@@ -87,7 +87,7 @@ class ApiHandler {
       });
       await this._safeLogWrite({ 
         flag: "api_core_utilities_failed", 
-        action: "core_utilities_failed", 
+        action: "api.core_utilities_failed", 
         message: `Core utilities initialization failed: ${err?.message || err}`, 
         critical: true, 
         data: { error: String(err), at: this.timestampFn() } 
@@ -410,8 +410,8 @@ class ApiHandler {
     
     // Execute handlers (serial or parallel based on config)
     const lastNonUndefined = this.parallelHandlers
-      ? await this._executeHandlersParallel(handlerFns, basePipelineInput, namespace, actionKey, errorHandler, requestTimestamp, pipelineStartTime)
-      : await this._executeHandlersSerial(handlerFns, basePipelineInput, namespace, actionKey, errorHandler, requestTimestamp, pipelineStartTime);
+      ? await this._executeHandlersParallel(handlerFns, basePipelineInput, namespace, actionKey, errorHandler, requestTimestamp, pipelineStartTime, requestId)
+      : await this._executeHandlersSerial(handlerFns, basePipelineInput, namespace, actionKey, errorHandler, requestTimestamp, pipelineStartTime, requestId);
     
     // Check if error response was returned
     if (lastNonUndefined && lastNonUndefined._isErrorResponse) {
@@ -425,7 +425,7 @@ class ApiHandler {
 
     await this._safeLogWrite({
       flag: "api_ok",
-      action: "ok",
+      action: "api.ok",
       message: `Success: ${routeIdentifier}`,
       critical: false,
       data: { namespace, actionKey, method, requestId, pipelineDuration, totalDuration, at: requestTimestamp }
@@ -876,7 +876,7 @@ class ApiHandler {
     return cleaned;
   }
 
-  async _executeHandlersSerial(handlerFns, basePipelineInput, namespace, actionKey, errorHandler, requestTimestamp, pipelineStartTime) {
+  async _executeHandlersSerial(handlerFns, basePipelineInput, namespace, actionKey, errorHandler, requestTimestamp, pipelineStartTime, requestId) {
     let lastNonUndefined;
     
     for (let i = 0; i < handlerFns.length; i++) {
@@ -931,7 +931,7 @@ class ApiHandler {
     return lastNonUndefined;
   }
 
-  async _executeHandlersParallel(handlerFns, basePipelineInput, namespace, actionKey, errorHandler, requestTimestamp, pipelineStartTime) {
+  async _executeHandlersParallel(handlerFns, basePipelineInput, namespace, actionKey, errorHandler, requestTimestamp, pipelineStartTime, requestId) {
     this._debugLog('🔄 [ApiHandler] Executing handlers in parallel mode');
     
     const handlerPromises = handlerFns.map(async (fn, i) => {

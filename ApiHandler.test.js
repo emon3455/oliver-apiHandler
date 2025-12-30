@@ -13,7 +13,19 @@ const mockSafeUtils = {
   sanitizeFloat: jest.fn((num) => typeof num === 'number' ? num : 0),
   sanitizeBoolean: jest.fn((bool) => Boolean(bool)),
   sanitizeArray: jest.fn((arr) => Array.isArray(arr) ? arr : []),
-  sanitizeObject: jest.fn((obj) => obj && typeof obj === 'object' ? obj : {})
+  sanitizeObject: jest.fn((obj) => obj && typeof obj === 'object' ? obj : {}),
+  sanitizeDeep: jest.fn((obj) => {
+    if (obj === null || typeof obj !== 'object') return obj;
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    if (Array.isArray(obj)) return obj.map(item => mockSafeUtils.sanitizeDeep(item));
+    const sanitized = {};
+    for (const key in obj) {
+      if (!dangerousKeys.includes(key) && Object.prototype.hasOwnProperty.call(obj, key)) {
+        sanitized[key] = typeof obj[key] === 'object' ? mockSafeUtils.sanitizeDeep(obj[key]) : obj[key];
+      }
+    }
+    return sanitized;
+  })
 };
 
 const mockAutoLoader = {
